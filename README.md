@@ -4,13 +4,12 @@
 
 # Welcome
 
-# Timeline
-
 - [Timeline](#Timeline)  
   - [Datasets](#Datasets)  
   - [Other useful resources](#Other)   
 <a name="headers"/>
 
+# Timeline
 
 # How to use Github for the hackathon
 
