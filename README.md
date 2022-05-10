@@ -1,5 +1,5 @@
 <div id="header" align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/a/a2/OECD_logo.svg" width="100"/>
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/OECD_logo.svg/1280px-OECD_logo.svg.png" width="100"/>
 </div>
 
 # Welcome
