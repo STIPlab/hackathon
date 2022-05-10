@@ -5,8 +5,9 @@
 # Welcome
 
 - [Timeline](#Timeline)  
-  - [Datasets](#Datasets)  
-  - [Other useful resources](#Other)   
+- [How to use Github for the hackathon](#How-to-use-Github-for-the-hackathon)
+- [Datasets](#Datasets)   
+- [Useful resources](#Useful-resources)   
 <a name="headers"/>
 
 # Timeline
