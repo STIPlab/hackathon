@@ -1,20 +1,20 @@
 ##### Table of Contents 
 
-[Headers](#headers)
-[Emphasis](#emphasis)
+[Timeline](# Timeline)
+[Datasets](# Datasets)
 ...snip...    
 <a name="headers"/>
 
-## Timeline
+# Timeline
 
-## Datasets
+# Datasets
 
-### STI policy strategies
+## STI policy strategies
 
 - a
 - b
 
-### STI policy initiatives
+## STI policy initiatives
 - https://stip.oecd.org/stip/pages/stipDataLab
 - https://stip.oecd.org/stip/data-stories
 
@@ -24,6 +24,6 @@ Use the ...
 pip install foobar
 ```
 
-## Other useful resources
+# Other useful resources
 
-## Contacts
+# Contacts
