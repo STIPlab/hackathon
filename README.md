@@ -1,8 +1,9 @@
 ##### Table of Contents 
 
 [Timeline](#Timeline)
+
 [Datasets](#Datasets)
-...snip...    
+
 <a name="headers"/>
 
 # Timeline
