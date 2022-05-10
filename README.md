@@ -27,7 +27,13 @@
 - https://stip.oecd.org/stip/data-stories
 
 ```bash
-pip install foobar
+url <- 'https://stip.oecd.org/assets/downloads/STIP_Survey.csv'
+
+#download the dataset
+download.file(url, destfile = 'stip.csv', mode = 'wb')
+
+#load the dataset into our working environment
+stip <- read_delim('stip.csv', '|', escape_double = FALSE, trim_ws = TRUE)
 ```
 
 # Useful resources
