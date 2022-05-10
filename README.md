@@ -2,7 +2,7 @@
 
 - [Timeline](#Timeline)  
   - [Datasets](#Datasets)  
-  - [Other useful resources](#Other useful resources)   
+  - [Other useful resources](#Other)   
 <a name="headers"/>
 
 # Timeline
