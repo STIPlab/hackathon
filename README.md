@@ -2,7 +2,7 @@
 
 - [Timeline](#Timeline)  
   - [Datasets](#Datasets)  
-  - [Contacts](#Contacts)   
+  - [Other useful resources](#Other useful resources)   
 <a name="headers"/>
 
 # Timeline
@@ -25,5 +25,3 @@ pip install foobar
 ```
 
 # Other useful resources
-
-# Contacts
