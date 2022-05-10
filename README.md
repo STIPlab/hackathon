@@ -1,11 +1,14 @@
 # Welcome
 
+# Timeline
+
 - [Timeline](#Timeline)  
   - [Datasets](#Datasets)  
   - [Other useful resources](#Other)   
 <a name="headers"/>
 
-# Timeline
+
+# How to use Github for the hackathon
 
 # Datasets
 
@@ -15,13 +18,12 @@
 - b
 
 ## STI policy initiatives
+
 - https://stip.oecd.org/stip/pages/stipDataLab
 - https://stip.oecd.org/stip/data-stories
-
-Use the ...
 
 ```bash
 pip install foobar
 ```
 
-# Other useful resources
+# Useful resources
