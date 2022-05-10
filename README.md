@@ -1,8 +1,8 @@
 # Welcome
 
 [Timeline](#Timeline)  
-[Datasets](#Datasets)
-[Contacts](#Contacts) 
+[Datasets](#Datasets)  
+[Contacts](#Contacts)  
 ...snip...    
 <a name="headers"/>
 
