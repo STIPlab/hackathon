@@ -18,7 +18,7 @@ In case you have any questions during the hackathon, please don't hesitate to re
 
 ## STI strategies database
 
-The TIP STI strategies database consists of a text corpus including 314  STI policy strategy documents (several million words overall) from across 24 OECD countries that covers the past several years, including both the duration of the COVID-19 pandemic and the period immediately prior. The documents have been collected in collaboration with national government officials working on STI policies in a range of public administrations and have been pre-processed and machine-translated to English by the OECD. In addition, the OECD team is currently developing an annotated version of the corpus that identifies key themes in the text and might be used by participants to train supervised language models.
+The _TIP STI strategies database_ consists of a text corpus including more than 300 STI policy strategy documents (several million words overall) from across 24 OECD countries that covers the past several years, including both the duration of the COVID-19 pandemic and the period immediately prior. The documents have been collected in collaboration with national government officials working on STI policies in a range of public administrations and have been pre-processed and machine-translated to English by the OECD.
 
 - a
 - b
@@ -27,7 +27,8 @@ The TIP STI strategies database consists of a text corpus including 314  STI pol
 
 The STIP Compass policy database includes qualitative and quantitative data on national STI policies. It is made up of close to 7000 initiatives from 57 countries and addresses all areas of STI policy, including initiatives spread across different ministries and national agencies, with competence over domains as broad as research, innovation, education, industry, environment, labour, finance/budget, among others. Its data is collected from a survey addressed to national government officials working on STI policies in a range of public administrations.
 
-- https://stip.oecd.org/stip/pages/stipDataLab
+More detailed information about the database can be found [here](https://stip.oecd.org/stip/pages/stipDataLab).
+
 - https://stip.oecd.org/stip/data-stories
 
 ```bash
