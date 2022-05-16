@@ -10,6 +10,10 @@ In case you have any questions during the hackathon, please don't hesitate to re
 
 ## How to use Github for the hackathon
 
+
+
+If you are not familiar with GitHub, here is a short tutorial that explains the most important functions.
+
 [![IMAGE ALT TEXT](http://img.youtube.com/vi/USjZcfj8yxE/0.jpg)](http://www.youtube.com/watch?v=USjZcfj8yxE "Video Title")
 
 ## How to access the data
