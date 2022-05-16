@@ -33,11 +33,28 @@ Please follow this [link](link) to download the data in .csv-format. The dataset
 
 ### STIP Compass policy database
 
-The STIP Compass policy database includes qualitative and quantitative data on national STI policies. It is made up of close to 7000 initiatives from 57 countries and addresses all areas of STI policy, including initiatives spread across different ministries and national agencies, with competence over domains as broad as research, innovation, education, industry, environment, labour, finance/budget, among others. Its data is collected from a survey addressed to national government officials working on STI policies in a range of public administrations.
+The STIP Compass policy database includes qualitative data on national STI policies. It is made up of close to 7000 initiatives from 57 countries and the European Union. The database covers all areas of STI policy, including initiatives spread across different ministries and national agencies, with competence over domains as broad as research, innovation, education, industry, environment, labour, finance/budget, among others. Its data is collected from a survey addressed to national government officials working on STI policies in a range of public administrations.
 
-More detailed information about the database can be found [here](https://stip.oecd.org/stip/pages/stipDataLab). On this page you will also find the links to the STIP dataset as well as relevant descriptions and codebooks.
+A few essential details about the dataset:
 
-To easily load the data in R you can use the following code.
+* The data model used to structure STIP Compass can understood by viewing this [PDF file](https://stip.oecd.org/assets/downloads/STIPCompassTaxonomies.pdf) and the accompanying [codebook](https://stiplab.github.io/hackathon/resources/2021%20STIP%20survey%20codebook.xlsx). 
+* The dataset has two header rows. The first row contains the variable names, whereas the second row includes a short description of the variable.
+* After the headers, each row provides data for a given initiative and instrument. As an initiative can have more than one instrument, subsequent rows can contain information on multiple instruments from the same initiative.
+* If you plan to load a CSV file, please select UTF-8 encoding and indicate the pipe character '|' (without quotes) as separator.
+
+More detailed information about the database can be found [here](https://stip.oecd.org/stip/pages/stipDataLab).
+
+To load the data in Python into a Pandas dataframe you can use the following code:
+
+```bash
+import pandas as pd
+
+#download the dataset
+url = 'https://stip.oecd.org/assets/downloads/STIP_Survey.csv'
+compass_df = pd.read_csv(url, sep='|', encoding='UTF-8-SIG', header=0, low_memory=False)
+```
+
+You can also easily load the data in R using the following code:
 
 ```bash
 url <- 'https://stip.oecd.org/assets/downloads/STIP_Survey.csv'
@@ -49,9 +66,13 @@ download.file(url, destfile = 'stip.csv', mode = 'wb')
 stip <- read_delim('stip.csv', '|', escape_double = FALSE, trim_ws = TRUE)
 ```
 
+You may inspect and re-use code found in these projects:
+
+* [Natural Language Processing of Research and Innovation Policy Data using R](https://stiplab.github.io/datastories/nlp%20tutorial/Getting%20Started%20with%20NLP%20of%20Research%20and%20Innovation%20Policy%20Data%20using%20R.html)
+* [Pilot analysis in Python comparing country policies in support of public research, **do not circulate**](https://stiplab.github.io/datastories/comparing%20countries/Comparing%20country%20policies%20using%20STIP%20Compass%20%5Bdraft%5D.html)
+
 ## Useful resources
 
 Here is a collection of links to futher useful resources:
- - https://stiplab.github.io/datastories/nlp%20tutorial/Getting%20Started%20with%20NLP%20of%20Research%20and%20Innovation%20Policy%20Data%20using%20R.html
  - a
  - b
