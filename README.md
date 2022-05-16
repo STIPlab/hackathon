@@ -53,3 +53,5 @@ stip <- read_delim('stip.csv', '|', escape_double = FALSE, trim_ws = TRUE)
 
 Here is a collection of links to futher useful resources:
  - https://stiplab.github.io/datastories/nlp%20tutorial/Getting%20Started%20with%20NLP%20of%20Research%20and%20Innovation%20Policy%20Data%20using%20R.html
+ - a
+ - b
