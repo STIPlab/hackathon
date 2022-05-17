@@ -15,10 +15,6 @@ Once you have finalised your project, we would like to ask you to upload all fin
  - a
  - b
 
-If you are not familiar with GitHub, here is a short tutorial that explains the most important functions.
-
-[![IMAGE ALT TEXT](http://img.youtube.com/vi/USjZcfj8yxE/0.jpg)](http://www.youtube.com/watch?v=USjZcfj8yxE "Video Title")
-
 ## How to access the data
 
 Please find below a short description of the two data sources as well as instructions on how to access the data.
