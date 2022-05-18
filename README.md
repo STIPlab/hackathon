@@ -41,7 +41,7 @@ url = "https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20
 data_github = pd.read_csv(url)
 ```
 
-To easily load the data in R you can also use the following code:
+To load the data in R you can also use the following code:
 
 ```bash
 library(RCurl)
