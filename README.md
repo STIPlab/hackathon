@@ -23,8 +23,15 @@ Please find below a short description of the two data sources as well as instruc
 The _TIP STI strategies database_ consists of a text corpus including more than 300 STI policy strategy documents (several million words overall) from across 24 OECD countries that covers the past several years, including both the duration of the COVID-19 pandemic and the period immediately prior. The documents have been collected in collaboration with national government officials working on STI policies in a range of public administrations and have been pre-processed and machine-translated to English by the OECD.
 
 The dataset includes the following columns:
-* a
-* b
+* _country_: Name of the country that issued the document
+* _period_: Indicator for whether the document was issued before or during the COVID-19 pandemic
+* _year_: Year when the document was issued
+* _doc_id_: Identifier of the document
+* _title_: Title of the document
+* _language_: Original lanugage of the document
+* _text original_: Untranslated, raw text of the document
+* _text raw_: Translated, raw text of the document
+* _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
 You can download the data in .csv-format from the resources folder in this repository. Alternatively, you can use the following Python code to load the data into a Pandas dataframe:
 
