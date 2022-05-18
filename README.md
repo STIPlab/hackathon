@@ -47,8 +47,8 @@ To easily load the data in R you can also use the following code:
 library(RCurl)
 
 #download the dataset
-data_github <- getURL("https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20strategies_database.csv")
-data_github <- read.csv(text = data_github)
+url <- getURL("https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20strategies_database.csv")
+data_github <- read.csv(text = url)
 ```
 
 ### STIP Compass policy database
