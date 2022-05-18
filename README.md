@@ -6,7 +6,7 @@
 
 This GitHub page provides the most important information on [how to use Github for the hackathon](#How-to-use-Github-for-the-hackathon) and [how to access the data](#How-to-access-the-data).
 
-In case you have any questions during the hackathon, please don't hesitate to reach out to us.
+In case you have any questions during the hackathon, please don't hesitate to reach out to us: Andres.BARRENECHE@oecd.org; Jan.EINHOFF@oecd.org; Maria.FLEMING@oecd.org; Blandine.SERVE@oecd.org. 
 
 ## How to use Github for the hackathon
 
