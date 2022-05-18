@@ -12,8 +12,7 @@ In case you have any questions during the hackathon, please don't hesitate to re
 
 Once you have finalised your project, we would like to ask you to upload all final outputs (code, visualisations, complementary materials, etc.) to your team folder in this repository. Please do so by...
 
- - a
- - b
+Please create a GitHub account so we can add you with your credetials as a collaborator on this repository...
 
 ## How to access the data
 
@@ -23,9 +22,11 @@ Please find below a short description of the two data sources as well as instruc
 
 The _TIP STI strategies database_ consists of a text corpus including more than 300 STI policy strategy documents (several million words overall) from across 24 OECD countries that covers the past several years, including both the duration of the COVID-19 pandemic and the period immediately prior. The documents have been collected in collaboration with national government officials working on STI policies in a range of public administrations and have been pre-processed and machine-translated to English by the OECD.
 
-Please follow this [link](link) to download the data in .csv-format. The dataset includes the following columns:
-- a
-- b
+You can download the data in .csv-format from the resources folder in this repository. 
+
+The dataset includes the following columns:
+* a
+* b
 
 ### STIP Compass policy database
 
@@ -66,9 +67,3 @@ You may inspect and re-use code found in these projects:
 
 * [Natural Language Processing of Research and Innovation Policy Data using R](https://stiplab.github.io/datastories/nlp%20tutorial/Getting%20Started%20with%20NLP%20of%20Research%20and%20Innovation%20Policy%20Data%20using%20R.html)
 * [Pilot analysis in Python comparing country policies in support of public research, **do not circulate**](https://stiplab.github.io/datastories/comparing%20countries/Comparing%20country%20policies%20using%20STIP%20Compass%20%5Bdraft%5D.html)
-
-## Useful resources
-
-Here is a collection of links to futher useful resources:
- - a
- - b
