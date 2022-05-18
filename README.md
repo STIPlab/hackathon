@@ -10,9 +10,7 @@ In case you have any questions during the hackathon, please don't hesitate to re
 
 ## How to use Github for the hackathon
 
-Once you have finalised your project, we would like to ask you to upload all final outputs (code, visualisations, complementary materials, etc.) to your team folder in this repository. Please do so by...
-
-Please create a GitHub account so we can add you with your credetials as a collaborator on this repository...
+Once you have finalised your project, we would like to ask you to upload all final outputs (code, visualisations, complementary materials, etc.) to your team folder in this repository. Please do so by dragging all files to the respective team folder or by using the GitHub desktop environment. To be able to upload the data, please create a GitHub account and let us know your credetials so we can add you as a collaborator.
 
 ## How to access the data
 
