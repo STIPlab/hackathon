@@ -32,19 +32,18 @@ You can download the data in .csv-format from the resources folder in this repos
 import pandas as pd
 
 #download the dataset
-url = 'https://github.com/STIPlab/hackathon/resources/STI strategies_database.csv'
-compass_df = pd.read_csv(url, sep=';', encoding='UTF-8-SIG', header=0, low_memory=False)
+url = "https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20strategies_database.csv"
+data_github = pd.read_csv(url)
 ```
 
 To easily load the data in R you can also use the following code:
 
 ```bash
-library(readr)
-
-url <- "https://github.com/STIPlab/hackathon/resources/STI strategies_database.csv"
+library(RCurl)
 
 #download the dataset
-data <- read_csv(url)
+data_github <- getURL("https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20strategies_database.csv")
+data_github <- read.csv(text = data_github)
 ```
 
 ### STIP Compass policy database
