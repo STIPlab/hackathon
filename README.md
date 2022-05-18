@@ -22,11 +22,30 @@ Please find below a short description of the two data sources as well as instruc
 
 The _TIP STI strategies database_ consists of a text corpus including more than 300 STI policy strategy documents (several million words overall) from across 24 OECD countries that covers the past several years, including both the duration of the COVID-19 pandemic and the period immediately prior. The documents have been collected in collaboration with national government officials working on STI policies in a range of public administrations and have been pre-processed and machine-translated to English by the OECD.
 
-You can download the data in .csv-format from the resources folder in this repository. 
-
 The dataset includes the following columns:
 * a
 * b
+
+You can download the data in .csv-format from the resources folder in this repository. Alternatively, you can use the following Python code to load the data into a Pandas dataframe:
+
+```bash
+import pandas as pd
+
+#download the dataset
+url = 'https://github.com/STIPlab/hackathon/resources/STI strategies_database.csv'
+compass_df = pd.read_csv(url, sep=';', encoding='UTF-8-SIG', header=0, low_memory=False)
+```
+
+To easily load the data in R you can also use the following code:
+
+```bash
+library(readr)
+
+url <- "https://github.com/STIPlab/hackathon/resources/STI strategies_database.csv"
+
+#download the dataset
+data <- read_csv(url)
+```
 
 ### STIP Compass policy database
 
@@ -54,6 +73,8 @@ compass_df = pd.read_csv(url, sep='|', encoding='UTF-8-SIG', header=0, low_memor
 You can also easily load the data in R using the following code:
 
 ```bash
+library(readr)
+
 url <- 'https://stip.oecd.org/assets/downloads/STIP_Survey.csv'
 
 #download the dataset
