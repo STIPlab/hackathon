@@ -29,7 +29,7 @@ The dataset includes the following columns:
 * _doc_id_: Identifier of the document
 * _title_: Title of the document
 * _language_: Original lanugage of the document
-* _text raw_: Translated text of the document
+* _text translated_: Translated text of the document
 * _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
 Please reach out if you require the original, untranslated documents for your analyses.
