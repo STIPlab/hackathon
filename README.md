@@ -32,6 +32,8 @@ The dataset includes the following columns:
 * _text raw_: Translated text of the document
 * _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
+Please reach out if you require the original, untranslated documents for your analyses.
+
 You can download the data in .csv-format from the resources folder in this repository. Alternatively, you can use the following Python code to load the data into a Pandas dataframe:
 
 ```bash
