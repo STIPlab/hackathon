@@ -12,7 +12,7 @@ In case you have any questions during the hackathon, please don't hesitate to re
 
 Once you have finalised your project, we would like to ask you to upload all final outputs (code, visualisations, complementary materials, etc.) to your team folder in this repository. Please do so by dragging all files to the respective team folder or by using the GitHub desktop environment. To be able to upload the data, please create a GitHub account and let us know your credetials so we can add you as a collaborator. Please note that GitHub will not accept individual files that are larger than 50MB.
 
-During the hackathon we will use GitHub to answer any questions you might have and to share them with all other participants. Please navigate to the 'Issues' tab on the main page of the repository and leave your question by creating a new issue. We will try to answer your question as soon as possible.
+During the hackathon we will use this GitHub respository to answer any questions you might have and to share the answers with all other participants. Please navigate to the 'Issues' tab on the main page of the repository and leave your question by creating a new issue. We will try to answer each question as soon as possible.
 
 ## How to access the data
 
