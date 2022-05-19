@@ -12,6 +12,8 @@ In case you have any questions during the hackathon, please don't hesitate to re
 
 Once you have finalised your project, we would like to ask you to upload all final outputs (code, visualisations, complementary materials, etc.) to your team folder in this repository. Please do so by dragging all files to the respective team folder or by using the GitHub desktop environment. To be able to upload the data, please create a GitHub account and let us know your credetials so we can add you as a collaborator. Please note that GitHub will not accept individual files that are larger than 50MB.
 
+*Add Issues for Q&A*
+
 ## How to access the data
 
 Please find below a short description of the two data sources as well as instructions on how to access the data.
@@ -27,8 +29,7 @@ The dataset includes the following columns:
 * _doc_id_: Identifier of the document
 * _title_: Title of the document
 * _language_: Original lanugage of the document
-* _text original_: Untranslated, raw text of the document
-* _text raw_: Translated, raw text of the document
+* _text raw_: Translated text of the document
 * _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
 You can download the data in .csv-format from the resources folder in this repository. Alternatively, you can use the following Python code to load the data into a Pandas dataframe:
