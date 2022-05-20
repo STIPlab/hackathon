@@ -95,3 +95,11 @@ You may inspect and re-use code found in these projects:
 
 * [Natural Language Processing of Research and Innovation Policy Data using R](https://stiplab.github.io/datastories/nlp%20tutorial/Getting%20Started%20with%20NLP%20of%20Research%20and%20Innovation%20Policy%20Data%20using%20R.html)
 * [Pilot analysis in Python comparing country policies in support of public research, **do not circulate**](https://stiplab.github.io/datastories/comparing%20countries/Comparing%20country%20policies%20using%20STIP%20Compass%20%5Bdraft%5D.html)
+
+### STI.Scoreboard
+
+A possible source of complementary data is the [STI.Scoreboard](https://www.oecd.org/sti/scoreboard.htm) infrastructure. It contains over 1000 indicators on research and development, science, business innovation, patents, education and the economy, drawing on the very latest, quality assured statistics from OECD and partner international organisations. These indicators are accessible via a dedicated API that uses SDMX queries. The following Python and R tutorials provide more information and include the necessary code to access this infrastructure.
+
+#### How to retrieve STI.Scoreboard indicators found in STIP Compass using Python and SDMX?
+* [Python tutorial](https://colab.research.google.com/drive/1-qPUqDh6QolHOauYf1pt4GWMW8M_yvzk?usp=sharing)
+* [R tutorial](https://colab.research.google.com/drive/168-JCLtK8PCduEmRY4x22qEVW1F0q0vc?usp=sharing)
