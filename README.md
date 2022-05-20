@@ -28,31 +28,11 @@ The dataset includes the following columns:
 * _year_: Year when the document was issued
 * _doc_id_: Identifier of the document
 * _title_: Title of the document
-* _language_: Original lanugage of the document
+* _text original_: Original text of the document
 * _text translated_: Translated text of the document
 * _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
-Please reach out if you require the original, untranslated documents for your analyses.
-
-You can download the data in .csv-format from the resources folder in this repository. Alternatively, you can use the following Python code to load the data into a Pandas dataframe:
-
-```bash
-import pandas as pd
-
-#download the dataset
-url = "https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20strategies_database.csv"
-data_github = pd.read_csv(url)
-```
-
-To load the data in R you can also use the following code:
-
-```bash
-library(RCurl)
-
-#download the dataset
-url <- getURL("https://raw.githubusercontent.com/STIPlab/hackathon/main/resources/STI%20strategies_database.csv")
-data_github <- read.csv(text = url)
-```
+You can download the data in .RData-format [here](https://www.dropbox.com/s/vd4ky6kv1a3cmho/strategies_final.RData?dl=0). The dataset is quite large which is why we use the .RData-format. You can easily open the file in R by using the load()-command.
 
 ### STIP Compass policy database
 
