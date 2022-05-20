@@ -24,15 +24,15 @@ The _TIP STI strategies database_ consists of a text corpus including more than 
 
 The dataset includes the following columns:
 * _country_: Name of the country that issued the document
-* _period_: Indicator for whether the document was issued before or during the COVID-19 pandemic
 * _year_: Year when the document was issued
+* _period_: Indicator for whether the document was issued before or during the COVID-19 pandemic
 * _doc_id_: Identifier of the document
 * _title_: Title of the document
 * _text original_: Original text of the document
 * _text translated_: Translated text of the document
 * _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
-You can download the data in .RData-format [here](https://www.dropbox.com/s/vd4ky6kv1a3cmho/strategies_final.RData?dl=0). The dataset is quite large which is why we use the .RData-format. You can easily open the file in R by using the load()-command or in Python by using the pyreadr package.
+You can download the data in .RData-format [here](https://www.dropbox.com/s/vd4ky6kv1a3cmho/strategies_final.RData?dl=0). The dataset is quite large which is why we use the .RData-format. You can easily open the file in R by using the load()-command or by using the pyreadr package in Python.
 
 ### STIP Compass policy database
 
