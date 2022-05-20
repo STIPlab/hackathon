@@ -32,7 +32,7 @@ The dataset includes the following columns:
 * _text translated_: Translated text of the document
 * _text clean_: Translated and cleaned text of the document (no numbers and punctuation, no stopwords, lemmatization, n-grams)
 
-You can download the data in .RData-format [here](https://www.dropbox.com/s/vd4ky6kv1a3cmho/strategies_final.RData?dl=0). The dataset is quite large which is why we use the .RData-format. You can easily open the file in R by using the load()-command.
+You can download the data in .RData-format [here](https://www.dropbox.com/s/vd4ky6kv1a3cmho/strategies_final.RData?dl=0). The dataset is quite large which is why we use the .RData-format. You can easily open the file in R by using the load()-command or in Python by using the pyreadr package.
 
 ### STIP Compass policy database
 
