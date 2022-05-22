@@ -1,8 +1,9 @@
-<div id="header" align="center">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/OECD_logo.svg/1280px-OECD_logo.svg.png" width="350"/>
-</div>
+--------------
+![image](https://user-images.githubusercontent.com/62353975/169685124-eccc8fe7-78d4-49c9-86f8-f30e2085a3e0.png)
 
-## Welcome to the OECD _Data science for STI policy_ hackathon GitHub repository!
+--------------
+
+## Welcome to the STIP Data Lab and OECD-TIP _Data science for STI policy_ hackathon GitHub repository!
 
 This GitHub page provides the most important information on [how to use Github for the hackathon](#How-to-use-Github-for-the-hackathon) and [how to access the data](#How-to-access-the-data).
 
