@@ -6,6 +6,7 @@ on:
 
 jobs:
   notify:
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
         - uses: jenschelkopf/issue-label-notification-action@1.3
