@@ -1,0 +1,18 @@
+name: Notify users based on issue labels
+
+on:
+  issues:
+      types: [labeled]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: jenschelkopf/issue-label-notification-action@1.3
+          with:
+             recipients: |
+                  Logistics=@jeinhoff-oecd @barreneche
+                  Other=@jeinhoff-oecd @barreneche
+                  STI.Scoreboard dataset=@blandineserve
+                  STIP Compass dataset=@barreneche @fleminm1
+                  TIP strategies dataset=@jeinhoff-oecd
