@@ -6,7 +6,7 @@
 
 This GitHub page provides the most important information on [how to use Github for the hackathon](#How-to-use-Github-for-the-hackathon) and [how to access the data](#How-to-access-the-data).
 
-In case you have any questions during the hackathon, please don't hesitate to reach out to us: Jan.EINHOFF@oecd.org; Andres.BARRENECHE@oecd.org; Maria.FLEMING@oecd.org; Blandine.SERVE@oecd.org. 
+In case you have any questions during the hackathon, please use this repository's [issues tab](https://github.com/STIPlab/hackathon/issues) and tag your post with one of the existing labels so the right persons are notified.
 
 ## How to use Github for the hackathon
 
