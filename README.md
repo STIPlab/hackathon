@@ -1,11 +1,12 @@
 --------------
-![image](https://user-images.githubusercontent.com/62353975/169685124-eccc8fe7-78d4-49c9-86f8-f30e2085a3e0.png)
+![image](https://user-images.githubusercontent.com/11832304/169899159-fb526aaf-8a59-4bf2-afd6-2744f82ecd6f.png)
 
 --------------
+[##### ACCESS THE KICK-OFF PRESENTATION ####](https://stiplab.github.io/hackathon/resources/STIP%20Data%20Lab%20and%20OECD-TIP%20Hackathon%20on%20data%20science%20for%20STI%20policy%20(kick-off).pptx)
 
 ## Welcome to the STIP Data Lab and OECD-TIP _Data science for STI policy_ hackathon GitHub repository!
 
-This GitHub page provides the most important information on [how to use Github for the hackathon](#How-to-use-Github-for-the-hackathon) and [how to access the data](#How-to-access-the-data).
+This GitHub page provides the most important information on how to use Github for the hackathon, how to access the data and a brief word on the expected outcome of the hackathon.
 
 ## How to use Github for the hackathon
 
@@ -82,3 +83,9 @@ A possible source of complementary data is the [STI.Scoreboard](https://www.oecd
 #### How to retrieve STI.Scoreboard indicators found in STIP Compass using Python and SDMX?
 * [Python tutorial](https://colab.research.google.com/drive/1-qPUqDh6QolHOauYf1pt4GWMW8M_yvzk?usp=sharing)
 * [R tutorial](https://colab.research.google.com/drive/168-JCLtK8PCduEmRY4x22qEVW1F0q0vc?usp=sharing)
+
+## Expected outcome of the hackathon
+
+For the 7 June closure event (3:00-5:00pm CEST), you should prepare a 10' presentation summarising your findings. We recognise that teams will only be able to work on the policy questions for a short time. We are not expecting definitive answers to the policy questions presented in the hackathon. Rather, we think that teams may propose one or more innovative approaches and possibly feature some initial observations from the data. We are excited to see what sort of avenues the teams will be coming up with!
+
+Following the closure event, we will be organising a separate debriefing seminar where participating teams will be able to elaborate and exchange on their technical choices and experiences working during the hackathon.
