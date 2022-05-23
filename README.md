@@ -2,7 +2,7 @@
 ![image](https://user-images.githubusercontent.com/11832304/169899159-fb526aaf-8a59-4bf2-afd6-2744f82ecd6f.png)
 
 --------------
-[##### ACCESS THE KICK-OFF PRESENTATION ####](https://stiplab.github.io/hackathon/resources/STIP%20Data%20Lab%20and%20OECD-TIP%20Hackathon%20on%20data%20science%20for%20STI%20policy%20(kick-off).pptx)
+[##### ACCESS THE KICK-OFF PRESENTATION ####](https://stiplab.github.io/hackathon/resources/STIP%20Data%20Lab%20and%20OECD-TIP%20Hackathon%20on%20data%20science%20for%20STI%20policy%20(kick-off).pdf)
 
 ## Welcome to the STIP Data Lab and OECD-TIP _Data science for STI policy_ hackathon GitHub repository!
 
