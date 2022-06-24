@@ -1,0 +1,474 @@
+---
+title: "PCA and Clustering"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r setup, include=FALSE}
+# Knitr options
+### Generic preamble
+Sys.setenv(LANG = "en") # For english language
+options(scipen = 5) # To deactivate annoying scientific number notation
+
+# rm(list=ls()); graphics.off() # get rid of everything in the workspace
+if (!require("knitr")) install.packages("knitr"); library(knitr) # For display of the markdown
+
+### Knitr options
+knitr::opts_chunk$set(warning=FALSE,
+                     message=FALSE,
+                     fig.align="center"
+                     )
+```
+
+Loading in the packages 
+
+```{r, include = FALSE}
+library(tidyverse) 
+library(magrittr) 
+library(lubridate)
+library(GGally)
+library(FactoMineR)
+library(factoextra)
+library(dplyr)
+library(uwot)
+library(Hmisc)
+library(skimr)
+```
+
+Loading in the data
+
+```{r, message= FALSE, warning = FALSE, comment= FALSE}
+data <- read_csv("Data/sti_scoreboard.csv", show_col_types = FALSE)
+list <- read.csv("https://stiplab.github.io/datastories/STI.Scoreboard/Inventory.csv", header = TRUE, sep = ",")
+country <- read_csv("https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/all/all.csv", show_col_types = FALSE) %>% select(name, `alpha-3`, region) %>% rename(COUNTRY = `alpha-3`, COUNTRY_FULL = "name")
+doc_df <- read_csv("Data/doc_cat_2.csv", show_col_types = FALSE)
+```
+
+## Data preparation
+```{r, include = FALSE}
+INDICATOR_LIST <- c("COPAT_XPCT", "H_XFB", "B_XFG", "G_FBXGDP", "B_XGDP", "G_XGDP", "GV_XFB", "GV_XGDP")
+```
+
+selecting indicators and rearranging dataset
+```{r}
+data <- data %>% filter(INDICATOR %in% INDICATOR_LIST)
+
+
+data <- data %>% unique() %>% pivot_wider(id_cols =c(COUNTRY, YEAR), names_from = INDICATOR, values_from = Value)
+
+
+data <- data %>% filter(COUNTRY != "G20_OECD" & COUNTRY != "G20_NON_OECD" & COUNTRY != "G20" & COUNTRY != "G-7" & COUNTRY != "EU28" & COUNTRY != "EU27_2020" & COUNTRY != "EU27" & COUNTRY != "EU" & COUNTRY != "EA19" & COUNTRY != "E23" & COUNTRY != "E23" & COUNTRY != "E22" & COUNTRY != "E15"  & COUNTRY != "OECD")
+```
+
+
+impute missing values
+```{r}
+data <- data %>%
+  fill(INDICATOR_LIST, .direction = "down") %>% 
+  fill(INDICATOR_LIST, .direction = "up") 
+```
+
+Five year Time-frame ID's
+```{r}
+data <- data %>% filter(YEAR >=2001 & YEAR <=2020) %>%
+  mutate(ID = ifelse(YEAR >= 2001 & YEAR <= 2005, 1, 
+                                    ifelse(YEAR >= 2006 & YEAR <= 2010, 2, 
+                                    ifelse(YEAR >= 2011 & YEAR <= 2015, 3, 
+                                    ifelse(YEAR >= 2016 & YEAR <= 2020, 4,0)))))
+
+data_all <- data %>% select(-YEAR) %>% group_by(COUNTRY, ID) %>% 
+  summarise(across(.cols = everything(), ~ mean(.x, na.rm =TRUE)))
+```
+
+
+codebook for indicators selected
+```{r, include = FALSE}
+list <- list %>% select(SerieCode, IndicatorLabel)
+
+codebook <- data_all %>% select(-ID) %>% pivot_longer(!COUNTRY, "INDICATOR") 
+
+codebook <- codebook[,2]
+
+codebook <- codebook %>% distinct()
+
+codebook <- codebook %>% left_join(list, by = c("INDICATOR" = "SerieCode"))
+
+codebook <- codebook %>% distinct()
+
+```
+
+
+Knowledge transfer triangulation
+```{r}
+kt <- doc_df %>% filter(assigned_category == "Knowledge Transfer")
+kt <- kt %>% select(CountryCode, StartDateYear) %>% rename(COUNTRY = CountryCode, START = StartDateYear)
+kt <- kt %>% group_by(COUNTRY, START) %>% summarise(n_kt =n())
+kt <- kt %>% filter(START > 2000)
+```
+
+```{r}
+data_kt <- data %>% left_join(kt, by = c("COUNTRY" = "COUNTRY", "YEAR" = "START")) 
+#data_kt <- data_kt %>% select(COUNTRY, YEAR, n_kt, co_create_1, co_create_2, co_create_3, co_create_4, co_all)
+data_kt %<>% mutate(n_kt = ifelse(is.na(n_kt), 0, n_kt))
+data_kt %<>% mutate(n_kt_lag1 = Lag(n_kt, -1), 
+                    n_kt_lag2 = Lag(n_kt, -2), 
+                    n_kt_lag3 = Lag(n_kt, -3))
+```
+
+
+co-creation triangulation
+```{r}
+co_create <- doc_df %>% filter(assigned_category == "Co-creation")
+co_create <- co_create %>% select(CountryCode, StartDateYear) %>% rename(COUNTRY = CountryCode, START = StartDateYear)
+co_create <- co_create %>% group_by(COUNTRY, START) %>% summarise(n_cocreate =n())
+co_create <- co_create %>% filter(START > 2000)
+```
+
+```{r}
+data_co <- data %>% left_join(co_create, by = c("COUNTRY" = "COUNTRY", "YEAR" = "START")) 
+data_co <- data_co %>% filter(YEAR > 2000)
+
+#data_co <- data_co %>% select(COUNTRY, YEAR, n_cocreate)#, co_create_1, co_create_2, co_create_3, co_create_4, co_all)
+data_co %<>% mutate(n_cocreate = ifelse(is.na(n_cocreate), 0, n_cocreate))
+data_co %<>% mutate(n_cocreate_lag1 = Lag(n_cocreate, -1), 
+                    n_cocreate_lag2 = Lag(n_cocreate, -2), 
+                    n_cocreate_lag3 = Lag(n_cocreate, -3))
+```
+
+
+## PCA
+
+Doing a PCA analysis with standardized scaling 
+```{r}
+res_pca <- data_all[,3:10] %>%
+  select_if(is_numeric) %>%
+  PCA(scale.unit = TRUE, ncp = 3, graph =FALSE)
+
+## Scree-plot with 10 components
+
+scree_plot <- res_pca %>% 
+  fviz_screeplot(addlabels = TRUE,
+                 ncp = 10,
+                 ggtheme = theme_gray())
+scree_plot
+```
+
+
+Adding the dimensions to the dataset
+
+```{r}
+coord_pca <- res_pca[["ind"]][["coord"]]
+data_all$dim1 <- coord_pca[,1]
+data_all$dim2 <- coord_pca[,2]
+data_all$dim3 <- coord_pca[,3]
+```
+
+The percentage of variance explained and the cumulative percentage of variance explained can be seen in the table below
+
+```{r}
+res_pca$eig[1:7,3] %>% as_tibble() %>% round(1)
+
+```
+
+
+EIGENVALUES 
+```{r, warning=FALSE, message=FALSE}
+res_pca$eig[1:5, 1:2] %>% as_tibble() %>% rownames_to_column(var = "component") %>% select(component, eigenvalue)
+```
+
+
+```{r}
+plot <- res_pca %>%
+  fviz_pca_biplot(alpha.ind = "cos2",
+                  col.ind = "contrib",
+                  gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+                  geom = "point",
+                  ggtheme = theme_bw())
+
+plot
+```
+ 
+Coloring points by region
+```{r}
+country_coord <- data.frame(x = res_pca[["ind"]][["coord"]][,1], 
+                            y = res_pca[["ind"]][["coord"]][,2], 
+                            #country = data1$COUNTRY, 
+                            #year = data1$YEAR)
+                            country = data_all$COUNTRY)
+
+country_coord %<>% left_join(country, by = c("country" = "COUNTRY"))
+```
+
+```{r}
+country_coord %>% 
+ggplot(aes(x = x, y = y, color = region)) + 
+  geom_point(size = 5) + 
+#theme(legend.position = "none")
+  theme()
+```
+ 
+
+## Cluster Analysis
+ 
+
+Doing a hierarchical clustering based on the first 3 principal components
+
+```{r, include = FALSE}
+res_hcpc <- res_pca %>% 
+  HCPC(nb.clust = -1,
+       graph = FALSE) 
+```
+
+Adding clusters to the observations
+```{r}
+data_all$cluster <- res_hcpc[["data.clust"]][["clust"]]
+data_all %<>% left_join(country %>% select(COUNTRY, COUNTRY_FULL))
+```
+
+calculating convex hull
+```{r}
+hull_data <- 
+  data_all %>%
+  drop_na() %>%
+  group_by(cluster) %>% 
+  slice(chull(dim1, dim2))
+```
+
+graph on cluster-membership
+```{r}
+data_all %>%
+  ggplot(aes(x = dim1, y = dim2, color = cluster)) + 
+  geom_point() + 
+  labs(x = "dim1 (28.7%)", y = "dim2 (26.3%)") + 
+  geom_polygon(data = hull_data, aes(fill = cluster,
+                   colour = cluster),
+               alpha = 0.3,
+               show.legend = FALSE) +
+
+  theme_bw()
+```
+
+**Which countries belong to each of the clusters?**
+```{r}
+summary <- table(data_all$COUNTRY, res_hcpc[["data.clust"]][["clust"]])
+
+
+
+summary_df <- data.frame(Clust_1 = summary[,1], 
+                         Clust_2 = summary[,2],
+                         Clust_3 = summary[,3])#, 
+                         #Clust_4 = summary[,4])
+
+summary_df <- summary_df %>% rownames_to_column("COUNTRY") 
+
+summary_df <- summary_df %>% left_join(country, by = "COUNTRY") %>% select(COUNTRY, COUNTRY_FULL, region, Clust_1, Clust_2, Clust_3)#, Clust_4)
+```
+
+```{r}
+summary_df %>% filter(Clust_3 >= 1) %>% select(COUNTRY_FULL, Clust_1, Clust_2, Clust_3) %>% arrange(desc(Clust_3))
+```
+
+```{r}
+summary_df %>% filter(Clust_2 >= 1) %>% arrange(desc(Clust_2))
+```
+
+```{r}
+summary_df %>% filter(Clust_3 >= 1)
+```
+
+
+### CLUSTER-level characteristics
+```{r}
+stat <- data_all %>% select(-COUNTRY, -ID) %>% group_by(cluster) %>% 
+  summarise(across(.cols = everything(), ~mean(.x, na.rm = TRUE)))
+
+stat <- cbind(stat, rowMeans(stat[,3:13])) %>% select(-COUNTRY)
+
+stat <- stat %>% rename("RowMeans" = `rowMeans(stat[, 3:13])`)
+```
+
+```{r}
+stat 
+```
+
+```{r}
+stat_left <- stat[,1:5] 
+stat_left <- stat_left %>% cbind(rowMeans(stat_left[,2:5]))
+stat_left <- stat_left %>% rename("RowMeans" = `rowMeans(stat_left[, 2:5])`)
+```
+
+```{r}
+stat_left
+```
+
+```{r}
+stat_right <- stat[,c(1,6:9)]
+stat_right <- stat_right %>% cbind(rowMeans(stat_right[,2:5]))
+stat_right <- stat_right %>% rename("RowMeans" = `rowMeans(stat_right[, 2:5])`)
+```
+
+```{r}
+stat_right
+```
+
+**Number of observations within each cluster**
+
+```{r}
+data_all %>% filter(cluster == 1) %>% nrow()
+```
+
+```{r}
+data_all %>% filter(cluster == 2) %>% nrow()
+```
+```{r}
+data_all %>% filter(cluster == 3) %>% nrow()
+```
+
+
+Adding Co-creation information from the STIP
+
+```{r}
+data_co_five <- data_co %>% filter(YEAR >=2001 & YEAR <=2020) %>%
+  mutate(ID = ifelse(YEAR >= 2001 & YEAR <= 2005, 1, 
+                                    ifelse(YEAR >= 2006 & YEAR <= 2010, 2, 
+                                    ifelse(YEAR >= 2011 & YEAR <= 2015, 3, 
+                                    ifelse(YEAR >= 2016 & YEAR <= 2020, 4,0)))))
+
+data_co_five %<>% select(COUNTRY, ID, n_cocreate) %>% group_by(COUNTRY, ID) %>% 
+  summarise(across(.cols = everything(), ~ mean(.x, na.rm =TRUE)))
+
+data_all %<>% left_join(data_co_five, by = c("COUNTRY" = "COUNTRY", "ID" = "ID"))
+
+data_all %>% group_by(cluster) %>% summarise(n = n(), avg = sum(n_cocreate) / n)
+```
+
+correlation between dimensions and cocreation
+```{r}
+reg <- lm(n_cocreate ~ dim1, data_all)
+summary(reg)
+```
+
+
+ADDING knowledge transfer on cluster-level
+```{r}
+data_kt_five <- data_kt %>% filter(YEAR >=2001 & YEAR <=2020) %>%
+  mutate(ID = ifelse(YEAR >= 2001 & YEAR <= 2005, 1, 
+                                    ifelse(YEAR >= 2006 & YEAR <= 2010, 2, 
+                                    ifelse(YEAR >= 2011 & YEAR <= 2015, 3, 
+                                    ifelse(YEAR >= 2016 & YEAR <= 2020, 4,0)))))
+
+data_kt_five %<>% select(COUNTRY, ID, n_kt) %>% group_by(COUNTRY, ID) %>% 
+  summarise(across(.cols = everything(), ~ mean(.x, na.rm =TRUE)))
+
+data_all %<>% left_join(data_kt_five, by = c("COUNTRY" = "COUNTRY", "ID" = "ID"))
+```
+
+correlation between dimensions and cocreation
+```{r}
+data_all %>% select(n_cocreate, INDICATOR_LIST, dim1, dim2, dim3) %>% ggcorr()
+```
+
+
+```{r}
+data_all[,2:16] %>% select(n_kt, n_cocreate, INDICATOR_LIST, dim1, dim2, dim3) %>% ggpairs()
+```
+
+```{r}
+data_all %>% group_by(cluster) %>% summarise(n = n(), avg = sum(n_kt, na.rm = TRUE) / n)
+```
+
+
+## Summary within cluster
+
+```{r}
+data_2 <- data_all %>% filter(cluster == 2)
+```
+
+```{r}
+data_2[,c(1, 3:10, 12:13)] %>% group_by(COUNTRY) %>% 
+  summarise(across(.cols = everything(), ~ mean(.x, na.rm = TRUE))) %>% 
+  ggplot(aes(x = reorder(COUNTRY, n_kt.x), y = n_kt.x)) + 
+  geom_col()
+```
+
+
+
+## STIP TRIANGULATION
+
+
+```{r}
+data_co %>% select(-COUNTRY, -YEAR) %>% na.omit() %>% ggpairs()
+```
+
+```{r}
+data_co %>% select(n_cocreate, n_cocreate_lag1, n_cocreate_lag2, n_cocreate_lag3, INDICATOR_LIST, -COUNTRY, -YEAR) %>% na.omit() %>% ggcorr()
+```
+
+## Knowledge transfer
+
+```{r}
+data_kt %>% select(-COUNTRY, -YEAR) %>% ggpairs()
+```
+
+
+```{r}
+data_kt %>% select( n_kt, n_kt_lag1, n_kt_lag2, n_kt_lag3, -COUNTRY, -YEAR, INDICATOR_LIST) %>% ggcorr()
+```
+
+
+## INDEX based on correlation
+
+Creating index
+```{r, include = FALSE}
+data_co <- data_co %>% mutate(co_create = (GV_XFB + G_XGDP + GV_XGDP) / 3)
+```
+
+
+
+Plotting co-creation / knowledge transfer over time
+```{r, include = FALSE}
+co_create_df <- data_co %>% 
+  filter(YEAR > 2000) %>% 
+  group_by(YEAR) %>% 
+  summarise(n = n(), co_avg = sum(co_create, na.rm =TRUE) / n) 
+
+
+ co_create <- co_create_df %>%
+  ggplot(aes(x = YEAR, y = co_avg)) + 
+  geom_smooth(method = "loess") + 
+  labs(y = "")
+  theme_bw()
+
+```
+
+```{r}
+co_create + 
+  labs(y = "CC and KT Index")
+```
+
+```{r, include = FALSE}
+co_create_country <- data_co %>% group_by(COUNTRY, YEAR) %>% 
+  summarise(n = n(), co_avg = sum(co_create) / n) %>% ungroup() %>% 
+  filter(co_avg > 1)
+
+
+ 
+```
+
+```{r}
+co_create_country %>%  
+  filter(YEAR == 2020) %>% 
+  ggplot(aes(x = reorder(COUNTRY, co_avg), y = co_avg, fill = COUNTRY)) + 
+  geom_col() + 
+  labs(y = "CC and KT Index", x = "Country", title = "CC and KK in 2020 by country") +
+  theme(legend.position = "none")
+```
+
+```{r}
+data_co %>% ggplot(aes(x = YEAR, y = co_create)) + 
+  geom_smooth(method = "loess", se = FALSE) + 
+  theme(legend.position = "none")
+```

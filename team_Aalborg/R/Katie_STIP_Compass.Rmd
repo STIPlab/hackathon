@@ -1,0 +1,1771 @@
+---
+title: "Hackathon - STIP Compass"
+output: html_document
+date: '2022-05-24'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.showtext = TRUE)
+```
+
+#SET UP
+```{r}
+### general options
+Sys.setenv(LANG = "en")
+options("scipen" = 100, "digits" = 4) # override R's tendency to use scientific notation
+
+### Clean workspace
+#rm(list=ls())
+#graphics.off()
+
+### Load packages (maybe need to be installed first)
+library(tidyverse) # General DS toolkit
+library(magrittr) # For advanced piping
+
+# Databases
+library(dbplyr) # for dplyr with databases
+
+# Dataviz
+library(gplots)
+library(ggraph) #Network
+#library(hrbrthemes) #Beautiful theme
+#library(viridis) #Beautiful theme
+library(svglite)  # for saving pictures in svg clearer format (can convert to png) 
+library(rsvg)
+library(kableExtra) #Format the table
+
+#Text Processing
+library(quanteda)
+library(quanteda.textplots)
+library(quanteda.textstats)
+library(wordcloud)
+library(wordcloud2)
+library(VennDiagram)
+library(tidytext) #Text pre-processing
+library(SnowballC) #Word stemming
+
+#Survival plot
+library(survival)
+library(survminer) #For colorful survival plot use with ggsurvplot()
+
+#Network
+library(tidygraph)
+
+
+# Economic Complexity
+library(EconGeo)
+```
+
+# Objective
+
+- In order to identify distinct instruments and country policy goals that reflect either co-creation or knowledge transfer approach, the ultimate objective is to find which policy initiatives are likely to aim for more co-creation activities; else, knowledge transfer; by weighting the proportion of keywords (in 'Tags' column of STIP Compass database) associated with each co-creation category or knowledge transfer category.
+
+- The methodology here is to use the network analysis to find co-occurred keywords in both categories.
+
+- The approach here is to select most relevant keywords for co-creation vs. knowledge transfer (Based on the discussion with our leader, Tiago Santos Pereira). Then, find co-occurred keywords. Then, weigh the policy initiatives based on the proportion of keyword from the two categories. 
+
+Note: 
+1) This R project is only using STIP Compass database to classify and characterize STIP Lab's policy initiatives. 
+The finally processed database, named doc_cat_2, will be integrated with the analyses of the other two databases named STI Scoreboard and TIP Strategies. See PPT for the overall workflow. 
+
+2) Section 2. only presents a general analysis of overall STIP data; some of which has already been presented by STIP Lab. For the workflow on how co-creation and knowledge transfer classification, see Section 3. and 4.  
+
+# 1. Cleaning the file: STIP Compass surveys
+See more data: https://stip.oecd.org/stip/pages/stipDataLab
+```{r}
+library(readr)
+
+
+url <- 'https://stip.oecd.org/assets/downloads/STIP_Survey.csv'   #2021
+
+#download the dataset Or download from the link above
+download.file(url, destfile = 'stip_2021.csv', mode = 'wb')
+
+
+#load the dataset into our working environment
+stip_0 <- read_delim('stip_2021.csv', '|', escape_double = FALSE, trim_ws = TRUE)
+
+```
+
+Prepare the dataset
+```{r}
+#Most columns with info on instruments start with the Letter 'F' followed by a number & a few more instruments
+instrument <- stip_0[,grepl('^[F][0-9]', (names(stip_0)))] %>% cbind(stip_0[,!grepl('Instrument', (names(stip_0)))])
+```
+
+```{r}
+# Removes all columns with instrument (start with F)
+stip <- stip_0[,!grepl('^[F][0-9]', (names(stip_0)))]
+
+#There are a few more columns with information on instruments. We remove them, too for the sake of coherence
+stip <- stip_0[,!grepl('Instrument', (names(stip_0)))]
+
+#This code identifies unique Initiative IDs. When multiple rows have the same initiative IDs, it retains only one of them. Since we have already removed all the information on instruments, no information is lost by retaining each initiative only once
+stip <- stip %>%
+  distinct(InitiativeID, .keep_all = T)
+
+names(stip)
+```
+
+The first row of the dataset does not contain actual data, but descriptions of the variables. We extract this row and create a dataframe from it that we call our codebook. 
+```{r}
+codebook <- as.data.frame(t(stip[1,])) %>%
+  rownames_to_column()
+
+names(codebook) <- c('Variable', 'Code')
+
+#...remove the first row from the dataset: 
+stip <- stip[-1, ]
+
+#take a look at the codebook
+head(codebook) #The first few variables names are mostly self-explanatory 
+```
+
+Add some new columns
+```{r}
+stip <- stip %>%
+  mutate(InitiativeID = as.numeric(gsub('http://stip.oecd.org/2021/data/policyInitiatives/', '', stip$InitiativeID))) %>%
+  mutate(year_length = as.numeric(EndDateYear)-as.numeric(StartDateYear)) %>%
+  relocate(year_length, .after = EndDateYear)
+
+```
+
+Combine short description with objectives to a new all_texts column
+```{r}
+#this creates a vector with the names of all columns we wish to unite
+cols <- c('ShortDescription', names(stip)[grepl('Objectives', names(stip))])
+
+#this unites these columns in the new column 'all_texts'
+stip$all_texts <- apply(stip[ ,cols], 1, paste, collapse = ' ')
+
+#take a look at the first few new documents (i.e. the pieces of textual data that we will analyse)
+head(stip$all_texts, 3)
+```
+
+Create corpus
+```{r}
+stip_corp <- corpus(stip, docid_field = 'InitiativeID', text_field = 'all_texts')
+
+#take a look
+stip_corp
+```
+
+```{r}
+stip_dfm <- dfm(stip_corp)
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+```
+
+Reduce the number of features in the dfm during pre-processing.
+```{r}
+stip_dfm  <- stip_dfm %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_docfreq = 0.01,  docfreq_type = 'prop') # retain only words included in at least 1% of documents
+  #dfm_subset(ntoken(stip_dfm) >= 10) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+stip_dfm
+```
+
+The dataset also contains a column with innovation-related keywords for each initiative (from a dedicated vocabulary of concepts). So, the second dfm is created  in another way than the previous one, since the unit of analysis in this case are not words, but keywords often consisting of multi-word expressions. This dfm is important and will be used for the key analysis throughout this session.  
+```{r}
+tag_dfm <- tokenizers::tokenize_regex(stip$Tags, pattern = '¬') %>%
+  as.tokens() %>%
+  dfm() %>%
+  dfm_remove(min_nchar = 3) 
+
+rownames(tag_dfm) <- stip$InitiativeID
+docvars(tag_dfm) <- stip
+
+tag_dfm
+```
+
+Detail of tag_dfm
+```{r}
+ndoc(tag_dfm) #number of docs
+nfeat(tag_dfm) #number of features
+head(docnames(tag_dfm)) #Policy codes
+head(ntoken(tag_dfm),10) #number of features per doc
+features <- featnames(tag_dfm) %>% as.data.frame() #Name of the keywords
+features_per_doc <- ntoken(tag_dfm) %>% as.data.frame() #Number of keywords in each policy documents
+```
+
+```{r}
+#Save the dfm in a form of dataframe
+Tag_csv <- tag_dfm %>% as.data.frame()
+```
+
+# 2. Visualizing the policy trend in general 
+## 2.1 Wordcloud & Hclust
+```{r}
+textplot_wordcloud(stip_dfm)
+textplot_wordcloud(tag_dfm)
+```
+
+How does language in different subsets of policy initiatives differ?
+```{r}
+#e.g. From the codebook: TH31  'Financial support to business R&D and innovation' 
+fs_keyness <- textstat_keyness(stip_dfm, 
+                              target = stip_dfm$TH31 == 1)
+textplot_keyness(fs_keyness)
+```
+Considering only documents in the dataset linked to this theme and then compare the initiatives from Canada to all the others.
+```{r}
+fs_dfm <- dfm_subset(stip_dfm, stip_dfm$TH31 == 1) 
+  
+can_keyness <- textstat_keyness(dfm_remove(fs_dfm, pattern = c('canada', 'canadian')), 
+                              target = fs_dfm$CountryCode == 'CAN')
+
+textplot_keyness(can_keyness)
+```
+Compare the documents from different countries.
+CAUTION: 1) The comparison below does not consider whether some countries report more information on particular themes or survey questions than others. 2) This analysis assigns similar weight to all initiatives
+```{r}
+#create a dfm that merges all documents by country
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+
+#computes distances between documents from different countries 
+tstat_dist <- as.dist(textstat_dist(dfm_countries)) #Don't know why this function is not working. But this is not the important analysis of this project anyway. 
+
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+
+plot(user_clust, cex = 0.5)
+```
+
+## 2.2 Network visualization of indicators
+
+### Themes network
+Select themes and StartDateYear of interest
+```{r}
+#Make a new stip dataframe for conversion to matrix
+#The selected themes are relevant to co-creation approach.
+stip_m <- stip %>% 
+  select(InitiativeID,StartDateYear,TH42,TH43,TH47,TH46,TH44,TH41) %>% 
+  mutate_if(is.character, as.numeric) %>% 
+  filter(StartDateYear == '2017')# filter year
+
+#Add a n_count column to see how many themes are present
+stip_m$n_count <- rowSums(stip_m[3:8]) 
+
+#Filter out initiatives that do not consist of these 6 themes
+stip_m <- stip_m %>% 
+  filter(n_count > 0) 
+
+#Make a matrix 
+m_int_TH <- stip_m %>% 
+  select(TH42,TH43,TH47,TH46,TH44,TH41) %>%
+  as.matrix()
+
+#Change row names into the corresponding InitiativeID
+ID <- stip_m$InitiativeID
+rownames(m_int_TH) <- ID
+
+```
+
+
+Create an initativeID*initiativeID matrix
+```{r}
+m_int_int <- m_int_TH %*% t(m_int_TH) 
+
+m_int_int[1:10,1:10] #first 10 rows
+
+```
+
+Filter only nodes with more than 2 links (weights) between two initiatives
+```{r}
+m_int_int[m_int_int[]> 2]
+```
+
+Create a table graph for plotting the network
+```{r}
+g_int <- m_int_int %>% as_tbl_graph(directed = FALSE) %N>%
+  mutate(dgr = centrality_eigen(weights = weight)) %N>%
+   mutate(name = as.numeric(name))
+```
+
+Add a community 
+```{r}
+g_int <- g_int %N>% 
+  mutate(community = group_edge_betweenness(weights = weight, directed = FALSE) %>% as.factor()) 
+```
+
+Add countries info
+```{r}
+g_int <- g_int %N>% left_join(stip %>% select(InitiativeID,NameEnglish,CountryLabel,YearlyBudgetRange,all_texts), by = c('name'='InitiativeID'))
+
+g_int
+```
+
+Visualize the variables of the nodes by community
+```{r}
+g_int %N>% as_tibble() %>% filter(community == 1)
+```
+
+Fix the coordinates
+```{r}
+coords_tech <- g_int %>% igraph::layout.fruchterman.reingold() %>% as_tibble(.name_repair = 'unique')
+colnames(coords_tech) <- c("x", "y")
+```
+
+Plot the network
+```{r}
+tmp <- tempfile() #Run a temporary file and use rsvg_png to save the .png file in your directory file
+svglite(tmp, width = 100, height = 100)
+
+g_int %>%
+  ggraph(layout = coords_tech) + 
+  geom_edge_link(aes(width = weight), alpha = 0.5, colour = "grey") + 
+  geom_node_point(aes(color = community, size = dgr))  + 
+  geom_node_text(aes(label = name), size = 25, repel = TRUE) +
+  theme_graph()+
+  coord_fixed()+
+  theme(legend.text = element_text(size =  100), #changing legend text size
+        legend.title = element_text(size = 100, face = "bold"),#changing legend title size
+        plot.title = element_text(size=100))+
+  scale_size( breaks = c(1, 10, 25, 40),
+              range = c(20, 40)) + #adjust relative node size
+  guides(colour = guide_legend(override.aes = list(size=60))) + #changing legend symbol size
+  labs(title =paste('Policy initiatives network started in 2017'),
+       subtitle = '')
+
+
+dev.off()
+
+rsvg::rsvg_png(tmp,"policy_initiative_network_2017.png")
+
+```
+
+### Target groups network
+Select the entire target groups and StartDateYear
+```{r}
+#Make a new stip dataframe for conversion to matrix
+stip_m2 <- stip %>% 
+  select(InitiativeID,StartDateYear,TG9,TG10,TG11,TG12,TG13,TG14,TG15,TG16,TG17,TG18,TG19,TG20,TG21,TG22,TG23,TG24,TG25,TG26,TG27,TG28,TG29,TG30,TG31,TG32,TG33,TG34,TG35,TG36,TG37,TG38,TG40) %>% 
+  mutate_if(is.character, as.numeric) %>% 
+  filter(StartDateYear == '2000') #filter year
+
+#Categorize the groups of actors according to the categories defined in STIP codebook and count the number of them
+stip_m2 %<>% 
+  rowwise() %>%
+  mutate(REO = sum(c_across(TG20:TG22)),
+         RST = sum(c_across(TG9:TG13),TG38),
+         FS = sum(c_across(TG29:TG33)),
+         FA = sum(c_across(TG25:TG28)),
+         INT = sum(c_across(TG34:TG37)),
+         GOV = sum(TG23,TG24,TG40),
+         ECON = sum(c_across(TG18:TG19)),
+         SOC = sum(c_across(TG14:TG16))
+         ) %>%
+  select(!starts_with("TG")) %>%
+  ungroup()
+
+#Add a n_count column to see how many target groups are present in total
+stip_m2$n_count <- rowSums(stip_m2[3:10]) 
+
+#Make a matrix 
+m_int_TG <- stip_m2 %>% 
+  #select(TG9,TG10,TG11,TG12,TG13,TG14,TG15,TG16,TG17,TG18,TG19,TG20,TG21,TG22,TG23,TG24,TG25,TG26,TG27,TG28,TG29,TG30,TG31,TG32,TG33,TG34,TG35,TG36,TG37,TG38,TG40) %>%
+ select(REO,RST,FS,FA,INT,GOV,ECON,SOC) %>%
+  as.matrix()
+
+#Change row names into the corresponding InitiativeID
+ID <- stip_m2$InitiativeID
+rownames(m_int_TG) <- ID
+
+```
+
+Create an initativeID*initiativeID matrix. 
+```{r}
+#m_int_int <- m_int_TG %*% t(m_int_TG)  #Network between initiative with combined number of actors. Not a good idea unless you make one matrix (network) per one actor
+m_actor <- m_int_TG %>% crossprod() %>% as.matrix() #Network between actors by the number of initiatives
+
+#m_int_int[1:10,1:10] #first 10 rows
+m_actor
+```
+
+Matrix by relatedness
+```{r}
+#m_int_rel <- m_int_int %>% 
+#  relatedness(method = "cosine")
+
+m_actor_rel <- m_actor %>%
+  relatedness(method = "cosine")
+m_actor_rel
+```
+
+Create a table graph for plotting the network
+```{r}
+g_int <- m_actor_rel %>% as_tbl_graph(directed = FALSE) %N>%
+  mutate(dgr = centrality_eigen(weights = weight)) %N>%
+#   mutate(name = as.numeric(name)) %N>%
+  filter(!node_is_isolated()) 
+```
+
+Add a community 
+```{r}
+g_int <- g_int %N>% 
+  mutate(community = group_edge_betweenness(weights = weight, directed = FALSE) %>% as.factor()) 
+```
+Add countries info
+```{r}
+#g_int <- g_int %N>% left_join(stip %>% select(InitiativeID,NameEnglish,CountryLabel,YearlyBudgetRange,all_texts), by = c('name'='InitiativeID'))
+
+#g_int
+```
+
+
+Visualize the variables of the nodes by community
+```{r}
+g_int %N>% as_tibble() %>% filter(community == 1)
+```
+
+```{r}
+#fix the coordinates
+coords_tech <- g_int %>% igraph::layout.fruchterman.reingold() %>% as_tibble(.name_repair = 'unique')
+colnames(coords_tech) <- c("x", "y")
+```
+
+
+```{r}
+tmp <- tempfile() #Run a temporary file and use rsvg_png to save the .png file in your directory file
+svglite(tmp, width = 100, height = 100)
+
+g_int %>%
+  ggraph(layout = coords_tech) + 
+  geom_edge_link(aes(width = weight), alpha = 0.5, colour = "grey") + 
+  geom_node_point(aes(color = name, size = dgr))  + 
+  geom_node_text(aes(label = name), size = 25, repel = TRUE) +
+  theme_graph()+
+  coord_fixed()+
+  theme(legend.text = element_text(size =  100), #changing legend text size
+        legend.title = element_text(size = 100, face = "bold"),#changing legend title size
+        plot.title = element_text(size=100))+
+  scale_edge_width(breaks = c(0,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4), #adjust relative edge size
+              range = c(2, 50)) +
+  scale_size( breaks = c(0,0.2,0.4,0.6,0.8,1),
+              range = c(5, 40)) + #adjust relative node size
+  guides(colour = guide_legend(override.aes = list(size=60))) + #changing legend symbol size
+  labs(title =paste('Actors relatedness network linked by policy initiatives in 2000'),
+       subtitle = '')
+
+
+dev.off()
+
+rsvg::rsvg_png(tmp,"policy_initiative_network_2000_actors.png")
+
+```
+
+### Organization network
+Detail of the organizations (Named Entity Recognition)
+```{r}
+library(stringr)
+head(stip_dfm$NameEnglish,10)
+```
+
+Not working! Need to group the keywords in 'Tags' according to 'Co-creation' and 'Knowledge Transfer' category
+```{r}
+m_org <- stip %>% 
+  select(InitiativeID,NameEnglish,CountryLabel,StartDateYear,Tags) %>%
+  drop_na(Tags)
+
+m_org_co <- m_org %>% 
+  as.matrix()
+
+ID <- m_org$NameEnglish
+rownames(m_org_co) <- ID
+
+```
+
+```{r}
+m_org_co <- tcrossprod(m_org_co)
+m_org_co[1:10,1:10]
+```
+
+
+# 3. Co-creation & Knowledge Transfer categorization
+## 3.1 Keyword-level categorization of 'Co-creation'&'Knowledge transfer'  
+These keywords are the initial and manually-selected keywords. The drawback here is that the network is sensitive to changes from the reduction or addition of new keywords. So consulting experts in that area is highly recommended. 
+
+There are 2 methods to be used: 1. TFIDF 2. Venn diagram (keywords that only co-occur in one category and not both). Our 4.2 Venn Diagram suggests that there are enough keywords to be used for each category, so this stringent keyword is preferred. If the amount of keywords for Method 2 is too few, TFIDF may be used as the second option but it needs to set the threshold differences, i.e., how much higher TFIDF should it scores in co-creation than knowledge transfer in order to be categorized as 'Co-creation' keyword?
+
+```{r}
+# Keywords for co-creation
+root_key_co <- list('brain circulation','engagement','challenge','in-kind','trust$','co-funding','collaborative','multilateral','platforms','joint','partnership','cooperation','value chain','tacit','triangle','mobility','triple helix','co-','open science')
+
+# Keywords for knowledge transfer
+root_key_kt <- list('bilateral','unidirectional','one-off','linear','voucher','short-term','transfer','contract','copyright','property rights','diffusion','flows','sharing','commercialisation','secrets','absorptive','licens','spin-off','vocational skills','adopt','brain drain')
+
+# Keywords that can apply to both (Unsure area)
+root_key_neutral <- list('cluster','network','patent','industry orientation','incubat','start-up','intellectual property','skills development','learning','schumpeter','collaboration','spillover','trademark','science-industry links','access','adapt','brain gain','user-driven','user-producer','product development')
+
+
+#Keywords for all (Combined file)
+root_key_all <- list('brain circulation','engagement','challenge','in-kind','trust$','co-funding','collaborative','multilateral','platforms','joint','partnership','cooperation','value chain','tacit','triangle','mobility','triple helix','co-',
+                                                'bilateral','unidirectional','one-off','linear','voucher','short-term','transfer','contract','copyright','property rights','diffusion','flows','sharing','commercialisation','secrets','absorptive','licens','spin-off','vocational skills','adopt','brain drain',
+
+'cluster','network','patent','industry orientation','incubat','start-up','intellectual property','skills development','learning','schumpeter','collaboration','spillover','trademark','science-industry links','access','adapt','brain gain','user-driven','user-producer','product development')
+ 
+```
+
+Look at the names of keywords/features. Check if the matched keywords are associated to the right category
+```{r}
+Cocreate_features <- dfm_select(tag_dfm, pattern = root_key_co, valuetype = 'regex') 
+#topfeatures(Cocreate_features)
+featnames(Cocreate_features)
+
+KT_features <- dfm_select(tag_dfm, pattern = root_key_kt, valuetype = 'regex') 
+#topfeatures(KT_features)
+featnames(KT_features)
+
+NT_features <-  dfm_select(tag_dfm, pattern = root_key_neutral, valuetype = 'regex') 
+#topfeatures(NT_features)
+featnames(NT_features)
+
+All_features <- dfm_select(tag_dfm, pattern = root_key_all, valuetype = 'regex') 
+featnames(All_features)
+```
+
+Subset documents containing at least 1 keyword
+```{r}
+Sub_doc_co <- Cocreate_features %>% dfm_subset(ntoken(.) > 0) 
+
+Sub_doc_kt <- KT_features %>% dfm_subset(ntoken(.) > 0) 
+
+Sub_doc_neutral <- NT_features %>% dfm_subset(ntoken(.) > 0) 
+
+Sub_doc <- All_features %>% dfm_subset(ntoken(.) > 0) 
+```
+Create a new dfm for co-occurred keywords of each category (Including the initial keywords plugged in early). Name them: Co_cloud, KT_cloud, NT_cloud respectively. (But we mainly focus on the first two)
+doc_key_cat contains all relevant keywords presented in all polcies which belong to Co-creation, Knowledge Transfer, or both categories. 
+XXX_cloud is a dfm
+doc_XXX is a datadrame
+```{r}
+# All
+All_cloud <- Sub_doc %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>% 
+  as.tokens() %>%
+  dfm()  
+
+rownames(All_cloud) <- rownames(Sub_doc)
+docvars(All_cloud) <- docvars(Sub_doc) %>% as.data.frame()
+# 1. Co-creation
+#Untokenize the keywords in Sub_doc_co file which contains all policies associated with the initially given keywords 
+Co_cloud <- Sub_doc_co %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>% 
+  as.tokens() %>%
+  dfm()  
+
+rownames(Co_cloud) <- rownames(Sub_doc_co)
+docvars(Co_cloud) <- docvars(Sub_doc_co) %>% as.data.frame()
+
+#Convert to dataframe and filter for keywords that are present (presence = 1)
+doc_cocreate <- Co_cloud %>% as.data.frame() %>%
+  pivot_longer(cols = 2:(length(featnames(Co_cloud))+1), names_to = 'keyword',values_to = 'presence') %>%
+  filter(presence == 1) %>% select(-presence) %>%
+  mutate(Category = 'Co-creation')
+
+# 2. KT
+KT_cloud <- Sub_doc_kt %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>%
+  as.tokens() %>%
+  dfm() 
+
+rownames(KT_cloud) <- rownames(Sub_doc_kt)
+docvars(KT_cloud) <- docvars(Sub_doc_kt) %>% as.data.frame()
+
+
+doc_KT <- KT_cloud %>%
+  as.data.frame() %>%
+  pivot_longer(cols = 2:(length(featnames(KT_cloud))+1), names_to = 'keyword',values_to = 'presence') %>%
+  filter(presence == 1) %>% select(-presence) %>%
+   mutate(Category = 'Knowledge transfer')
+
+# 3. Neutral (NT)
+NT_cloud <- Sub_doc_neutral %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>%
+  as.tokens() %>%
+  dfm() 
+
+rownames(NT_cloud) <- rownames(Sub_doc_neutral)
+docvars(NT_cloud) <- docvars(Sub_doc_neutral) %>% as.data.frame()
+
+doc_NT <- NT_cloud %>%
+  as.data.frame() %>%
+  pivot_longer(cols = 2:(length(featnames(NT_cloud))+1), names_to = 'keyword',values_to = 'presence') %>%
+  filter(presence == 1) %>% select(-presence) %>%
+  mutate(Category = 'Neutral')
+
+
+doc_key_cat <- rbind(doc_cocreate,doc_KT,doc_NT)
+
+#write.csv(doc_key_cat,paste0("C:\\doc_key_cat.csv"), row.names = FALSE)
+```
+
+Plot text frequency in one theme: How does language in different subsets of policy initiatives differ?
+```{r}
+textplot_keyness(textstat_keyness(doc_all_dfm, 
+                              target = doc_all_dfm$TH42 == 1))
+```
+
+
+Wordcloud of all co-occurred keywords in all policy documents.
+E.g., Co_cloud_tfidf consists of keywords co-occurred with at least one of the 'Co-creation' category. 
+```{r}
+Co_cloud_tfidf <- Sub_doc_co %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>%
+  as.tokens() %>%
+  dfm()  %>%
+  dfm_tfidf()
+  # dfm_trim() #trim out terms that are less frequent than 10 (for dfm with binary features)
+
+rownames(Co_cloud_tfidf) <- rownames(Sub_doc_co)
+
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Keywords/Co_creation_tfidf.png"),width = 1000, height = 1000)
+
+Co_cloud_tfidf %>%
+ textplot_wordcloud()
+ 
+mtext("Cocreation-associated keywords frequency: TFIDF",
+      side=3, 
+      line=1, 
+      at= 0.5, 
+      adj= 0.5, 
+      cex=3) 
+#dev.off()
+```
+
+```{r}
+KT_cloud_tfidf <- Sub_doc_kt %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>%
+  as.tokens() %>%
+  dfm() %>%
+  dfm_tfidf() 
+ # dfm_trim(min_termfreq = 20, termfreq_type = "rank") #trim out terms that are less frequent than 10
+rownames(KT_cloud_tfidf) <- rownames(Sub_doc_kt)
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Keywords/Knowledge_transfer_tfidf.png"),width = 1000, height = 1000)
+KT_cloud_tfidf %>%
+  textplot_wordcloud()
+
+mtext("Knowledge transfer-associated keywords frequency: TFIDF",
+      side=3, 
+      line=1, 
+      at= 0.45, #adjust horizontal line here
+      adj= 0.5, 
+      cex=2) 
+
+#dev.off()
+```
+
+```{r}
+NT_cloud_tfidf <- Sub_doc_neutral %>% 
+  docvars("Tags") %>% 
+  tokenizers::tokenize_regex(pattern = '¬') %>%
+  as.tokens() %>%
+  dfm() %>%
+  dfm_tfidf() 
+ # dfm_trim(min_termfreq = 20, termfreq_type = "rank") #trim out terms that are less frequent than 10
+rownames(NT_cloud_tfidf) <- rownames(Sub_doc_neutral)
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Keywords/Neutral_tfidf.png"),width = 1000, height = 1000)
+NT_cloud_tfidf %>% textplot_wordcloud()
+  
+mtext("Neutrally associated keywords frequency: TFIDF",
+      side=3, 
+      line=1, 
+      at= 0.45, #adjust horizontal line here
+      adj= 0.5, 
+      cex=3) 
+
+#dev.off()
+```
+
+
+Removing the initial keyword that we insert, so that we can visualize only the co-occurred keywords. Note that these keywords can belong to more than one category (overlap)
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Keywords/Co_creation_category_related.png"),width = 3000, height = 3000)
+Co_cloud_tfidf %>% dfm_remove(pattern = root_key_co, valuetype = "regex") %>% textplot_wordcloud()
+#dev.off()
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Keywords/Knowledge_transfer_category_related.png"),width = 2000, height = 2000)
+KT_cloud_tfidf %>% dfm_remove(pattern = root_key_kt, valuetype = "regex") %>% textplot_wordcloud()
+#dev.off()
+```
+
+#### Re-categorize the keywords
+Run the binary_cat to see the presence of the keywords. 
+
+Example of keywords with TFIDF in Co-creation 
+```{r}
+Co_cloud_tfidf %>% as.data.frame() %>% pivot_longer(cols = 2:(length(featnames(Co_cloud_tfidf))+1), names_to = 'keywords', values_to = 'tfidf')
+```
+1. Make columns (XX_presence) that indicates whether the co-occurred keywords present in each category in each document.
+2. Then make another set of columns (XX_belong) that only indicates whether that keywords are initially selected, i.e., originally belong to that particular category (keywords which are defined in key_co, key_kt,key_neutral)
+  * Cocreate_features is a dfm() containing the root key terms in key_co
+
+- if presence is 0, means they keyword does not occur in that category. 
+- absence keyword always return tfidf = 0.
+
+```{r}
+#Convert to data frame
+keyword_dat <- 
+  as.data.frame(Co_cloud_tfidf) %>% 
+  pivot_longer(cols = 2:(length(featnames(Co_cloud_tfidf))+1),names_to = 'name', values_to = 'tfidf_cocreate') %>%
+    #Join the Co-creation dfm that has tfidf value and binary values
+  full_join( as.data.frame(Co_cloud) %>% pivot_longer(cols = 2:(length(featnames(Co_cloud_tfidf))+1),names_to = 'name', values_to = 'Cocreate_presence'), by = c('doc_id','name')) %>%
+  #Join the Knowledge Transfer dfm that has tfidf value and binary values
+  full_join(as.data.frame(KT_cloud_tfidf) %>% 
+              pivot_longer(cols = 2:(length(featnames(KT_cloud_tfidf))+1),names_to = 'name', values_to = 'tfidf_knowledge_transfer'), by = c('doc_id','name'))%>%
+  full_join(as.data.frame(KT_cloud) %>% 
+              pivot_longer(cols = 2:(length(featnames(KT_cloud_tfidf))+1),names_to = 'name', values_to = 'KT_presence'), by = c('doc_id','name')) %>%
+  #Join the Neutral dfm that has tfidf value and binary values
+  full_join(as.data.frame(NT_cloud_tfidf) %>% 
+              pivot_longer(cols = 2:(length(featnames(NT_cloud_tfidf))+1),names_to = 'name', values_to = 'tfidf_neutral'), by = c('doc_id','name')) %>%
+  full_join(as.data.frame(NT_cloud) %>% 
+              pivot_longer(cols = 2:(length(featnames(NT_cloud_tfidf))+1),names_to = 'name', values_to = 'NT_presence'), by = c('doc_id','name')) %>%
+  #Detect whether the keyword is the root words
+    mutate(Cocreate_root = ifelse(name %in% featnames(Cocreate_features),1,0),
+         KT_root = ifelse(name %in% featnames(KT_features),1,0),
+         NT_root = ifelse(name %in% featnames(NT_features),1,0)) %>%
+  #Relocate columns
+    relocate(tfidf_knowledge_transfer, .after = tfidf_cocreate) %>%
+    relocate(tfidf_neutral, .after = tfidf_knowledge_transfer) %>%
+  #Replace NA with zero
+  replace_na(list(Cocreate_presence = 0, KT_presence = 0, NT_presence = 0))
+  
+  
+  
+  # Columns indicating the presence of root + sub keywords
+  #mutate(Cocreate_presence = ifelse(name %in% featnames(Co_cloud_tfidf),1,0),
+  #       KT_presence = ifelse(name %in% featnames(KT_cloud_tfidf),1,0),
+  #       NT_presence = ifelse(name %in% featnames(NT_cloud_tfidf),1,0)) %>%
+  # Columns indicating the presence of only the root keywords
+
+
+keyword_dat
+```
+
+Which documents have high/low score of cumulative tfidf of relevant word?
+```{r}
+keyword_dat %>% group_by(doc_id) %>% 
+  summarise(Sum_cocreate = sum(tfidf_cocreate, na.rm = T),
+            Sum_KT = sum(tfidf_knowledge_transfer, na.rm = T),
+            Sum_neutral = sum(tfidf_neutral, na.rm = T)) 
+```
+
+Some documents contain sub and root keyword(s) that only present in Co-creation category, sometimes both or all, sometimes none.  
+```{r}
+keyword_dat %>% group_by(doc_id,Cocreate_presence,KT_presence,NT_presence) %>% 
+  summarise(Sum_cocreate = sum(tfidf_cocreate, na.rm = T),
+            Sum_KT = sum(tfidf_knowledge_transfer, na.rm = T),
+            Sum_neutral = sum(tfidf_neutral, na.rm = T))
+```
+
+### Method 1: Keyword TFIDF and Word cloud for each category
+The frequency of words is the highest if it is an initially-selected word in that particular category. In general, this may not be necessary for TFIDF since TFIDF measures the originality of the words in a separate category. Note: TFIDF calculation is two-folded normalized. First, each document is normalized to length 1 = no bias for shorter or longer document. Second, IDF is cross-document normalized, putting less weight on common terms and more on rare terms. Therefore, TFIDF of each category can be compared. 
+
+However, here the featfreq(Co_cloud)  = docfreq(Co_cloud) because each document only contain one keyword and no more duplicates. So the TFIDF is roughly proportional to the frequency of the keywords. And therefore, there are still some bias from 'winner-picking' (picking the initially-selected keywords), but this is the only choice we have at the moment. There is still the next filtration on policy level which can (hopefully) alleviate such bias.
+
+^ Example calculation for cumulative TFIDF in one category: featfreq(Co_cloud) * log(ndoc(Co_cloud) / docfreq(Co_cloud), base = 10) --> incubators = 5*log(487/5) = 9.942 in total. 
+While the frequency it appears in one document is  1*log(487/5) =1.988.
+
+```{r}
+#Group by initially-selected keywords, result in 598 rows
+Keyword_categories <- keyword_dat %>% 
+  group_by(name,Cocreate_root,KT_root,NT_root) %>%
+  summarise(freq_cocreate = sum(Cocreate_presence), #Tells how many documents have this keyword
+            freq_KT = sum(KT_presence),
+            freq_NT = sum(NT_presence),
+            Total_doc = sum(freq_cocreate,freq_KT,freq_NT),
+            Tfidf_cocreate = sum(tfidf_cocreate, na.rm = T),
+            Tfidf_KT = sum(tfidf_knowledge_transfer, na.rm = T),
+            Tfidf_neutral = sum(tfidf_neutral, na.rm = T)) %>%
+ 
+  #Assigned new category 
+  #Note: Remove the neutral keywords if you only prefer keywords that are clearly belong to one category
+  mutate(assigned_category = case_when(Tfidf_KT > Tfidf_cocreate & Tfidf_KT > Tfidf_neutral ~ 'Knowledge Transfer',
+                                  Tfidf_cocreate > Tfidf_KT & Tfidf_cocreate > Tfidf_neutral~ 'Co-creation',
+                                  Tfidf_neutral > Tfidf_KT & Tfidf_neutral > Tfidf_cocreate~ 'Neutral')) %>%
+  
+  #Whether that key is the originally assigned keywords (root key) or they are the co-occurred keys
+  mutate(attribute_2 = case_when(Cocreate_root == 1 & KT_root == 0 & NT_root == 0 ~ 'Cocreate Root Key',
+                                 Cocreate_root == 0 & KT_root == 1 & NT_root == 0 ~ 'Knowledge Transfer Root Key',
+                                 Cocreate_root == 0 & KT_root == 0 & NT_root == 1 ~ 'Neutral Root Key',
+                                 Cocreate_root == 0 & KT_root == 0 & NT_root == 0 ~ 'Co-occurred Key')) %>%
+  ungroup()
+```
+
+```{r}
+#write.csv(Keyword_categories,paste0("C:\\keyword_data_2.csv"), row.names = FALSE)
+```
+
+### Method 2: Venn diagram categorization
+This one return keywords in each policy docs. When distinct the 'name', it returns 544 distinct keywords (There are 598 distinct keywords in Keyword_categories in Method 1 because we include Neutral keywords in Method 1, which is not going to be used for our method). 
+
+The number of distinct keywords are different because of the different methods to calculate between TFIDF and Venn Diagram.
+```{r}
+Keyword_categories_2 <- tag_dfm %>% as.data.frame() %>% 
+  pivot_longer(2:(length(featnames(tag_dfm))+1),names_to = 'name', values_to = 'presence') %>%
+  filter(presence == 1) %>% select(-presence) %>%
+  
+  #Whether a keyword is present in each of the category or both
+  mutate(Cocreate_presence = ifelse(name %in% Cocreate_key$Co_creation,1,0),
+         KT_presence = ifelse(name %in% KT_key$Knowledge_transfer,1,0),
+         Overlap_presence = ifelse(name %in% Overlap_key$Overlap,1,0)) %>%
+  filter(Cocreate_presence != 0 | KT_presence != 0 | Overlap_presence != 0) 
+```
+
+Draw a Venn Diagram
+```{r}
+set_co <- Keyword_co[-1] %>% colnames()
+set_kt <- Keyword_KT[-1] %>% colnames()
+x = list(set_co,set_kt)
+
+venn.diagram(x,width = 5000,height = 5000,cat.cex = 1.2,cex = 2,
+             category.names = c("Co-creation","Knowledge Transfer"),
+             filename = "venn_diagram_1.png",
+             output=TRUE)
+```
+
+## 3.2 Policy-level categorization of 'Co-creation' & 'Knowledge transfer'
+
+### Method 1: TFIDF
+Not a good choice because TFIDF is high for all categories, meaning that there's a large overlapping extent between Co-creation and Knowledge Transfer and the boundary is unclear. Also, we want policies that have typically high weight on co-creation. A slight difference in 1 value without creating differential threshold may assign them to a wrong category (Type 2 error: false negative or false positive).
+
+4.1.2 Venn diagram shows that there are enough number of policies that have higher weight in co-creation and knowledge transfer, and not both. 
+```{r}
+doc_cat <- tag_dfm %>% as.data.frame() %>% 
+  pivot_longer(2:(length(featnames(tag_dfm))+1),names_to = 'name', values_to = 'presence') %>%
+  filter(presence == 1) %>% select(-presence) %>%
+  
+  #Join with the dataframe where we have already calculated TFIDF for all the keywords
+  left_join(Keyword_categories, by = 'name') %>%
+  
+  #Categorize based on the highest TFIDF values
+  #Calculate total TFIDF in each document for each category 
+  group_by(doc_id) %>%
+  summarise(Tfidf_cocreate_sum = sum(Tfidf_cocreate, na.rm = TRUE),
+            Tfidf_KT_sum = sum(Tfidf_KT, na.rm = TRUE),
+            Tfidf_neutral_sum = sum(Tfidf_neutral, na.rm = TRUE)) %>%
+  ungroup() %>%
+  
+  #Assigning the categories
+  mutate(assigned_category = case_when(
+    Tfidf_cocreate_sum > Tfidf_KT_sum & Tfidf_cocreate_sum > Tfidf_neutral_sum ~ 'Co-creation',
+    Tfidf_KT_sum > Tfidf_cocreate_sum & Tfidf_KT_sum > Tfidf_neutral_sum ~ 'Knowledge Transfer',
+    Tfidf_neutral_sum > Tfidf_KT_sum & Tfidf_neutral_sum > Tfidf_cocreate_sum ~ 'Both')) %>%
+  
+  #Join the data with STIP initative datset
+  mutate(doc_id = as.numeric(doc_id)) %>% 
+  left_join(stip, by = c('doc_id' = 'InitiativeID'))
+  
+```
+
+Visualize number of policies in Co-creation vs. Knowledge Transfer across all years
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Keywords/Cat_doc.png"),width = 2000, height = 2000)
+
+doc_cat %>% filter(assigned_category != 'Both') %>% 
+  group_by(assigned_category,StartDateYear) %>% 
+  drop_na(StartDateYear) %>%
+  summarise(N = n()) %>% arrange(desc(StartDateYear)) %>%
+  ggplot(aes(x=StartDateYear,y=N, fill = assigned_category)) +
+  geom_bar(stat = "identity") +
+  xlab("Year") +
+  ylab("Number of documents/policy initiatives") +
+   theme(axis.text.x = element_text(size = 30,angle = 45),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30)
+         ) 
+
+
+#dev.off()
+```
+
+
+### Method 2: Venn Diagram and then weigh them
+Again, we use this method to further filter the policies based on the weight of keywords presented in each category
+```{r}
+doc_cat_2 <- tag_dfm %>% as.data.frame() %>% 
+  pivot_longer(2:(length(featnames(tag_dfm))+1),names_to = 'name', values_to = 'presence') %>%
+  filter(presence == 1) %>% select(-presence) %>%
+  
+  #Whether a keyword is present in each of the category or both
+  mutate(Cocreate_presence = ifelse(name %in% Cocreate_key$Co_creation,1,0),
+         KT_presence = ifelse(name %in% KT_key$Knowledge_transfer,1,0),
+         Overlap_presence = ifelse(name %in% Overlap_key$Overlap,1,0)) %>%
+  
+  #Calculate the weight of keywords that present in Co-creation, Knowledge Transfer, or both categories.
+  group_by(doc_id) %>% summarise(Total_key = n(),
+                                 Cocreation_p = sum(Cocreate_presence)/Total_key,
+                                 KT_p = sum(KT_presence)/Total_key,
+                                 Overlap_p = sum(Overlap_presence)/Total_key) %>%
+  #Assign a category for a policy
+  mutate(assigned_category = case_when(Cocreation_p + Overlap_p > KT_p + Overlap_p ~ 'Co-creation',
+                                       Cocreation_p + Overlap_p < KT_p + Overlap_p ~ 'Knowledge Transfer',
+                                       Overlap_p > Cocreation_p + KT_p | Cocreation_p == KT_p ~ 'Both')) %>%
+  #Join the data with STIP initative datset
+  mutate(doc_id = as.numeric(doc_id)) %>% 
+  left_join(stip, by = c('doc_id' = 'InitiativeID'))
+  
+
+```
+
+```{r}
+#write.csv(doc_cat_2,paste0("C:\\doc_cat_2.csv"), row.names = FALSE)
+```
+
+# 4.Keyword analysis of Co-creation and Knowledge Transfer policies 
+Number of docs in each category
+```{r}
+doc_cat_2 %>% group_by(assigned_category) %>% summarise( N = n())
+```
+Number of countries
+
+```{r}
+doc_cat_2 %>% group_by(CountryLabel,assigned_category) %>% summarise( N = n())
+```
+
+
+Total docs count each category over time
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Initiatives/Cat_doc_2.png"),width = 2000, height = 2000)
+
+doc_cat_2 %>% filter(assigned_category != 'Both') %>% 
+  group_by(assigned_category,StartDateYear) %>% 
+  drop_na(StartDateYear) %>%
+  summarise(N = n()) %>% arrange(desc(StartDateYear)) %>%
+
+  ggplot(aes(x=StartDateYear,y=N, fill = assigned_category)) +
+  geom_bar(stat = "identity") +
+  xlab("Year") +
+  ylab("Number of documents/policy initiatives") +
+   theme(axis.text.x = element_text(size = 30,angle = 45),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30)
+         ) 
+
+#dev.off()
+
+```
+
+Difference in doc count
+```{r}
+png(filename = paste0( getwd(), "/Plots/Initiatives/Cat_doc_2.png"),width = 2000, height = 2000)
+  
+doc_cat_2 %>%
+  group_by(StartDateYear,assigned_category) %>%
+  drop_na(StartDateYear) %>%
+  summarise(N = n()) %>%
+  
+  #calculate total initiatives(Both+Co-create+Knowledge Transfer)
+  left_join(doc_cat_2 %>%
+  group_by(StartDateYear) %>%
+  summarise(Total_initiatives = n()), by = 'StartDateYear') %>%
+  
+  #Calculate proportional differences
+  group_by(StartDateYear) %>%
+  filter(assigned_category != 'Both') %>%
+  summarise(Diff_p = 100*diff(N)/Total_initiatives) %>%
+  distinct(StartDateYear, .keep_all = TRUE) %>%
+  #Make category again so that you can them the same color in fill = 
+  mutate(Category = ifelse(Diff_p < 0,"co-create", "knowledge transfer")) %>%
+  ungroup() %>%
+  
+  ggplot(aes(x=StartDateYear,y=Diff_p, fill = StartDateYear)) +
+  geom_bar(stat = "identity") +
+  xlab("Year") +
+  ylab("Difference in proportion of policy initiatives (%)") +
+   theme(axis.text.x = element_text(size = 30,angle = 45),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30),
+         legend.position = 'none'
+         ) 
+
+dev.off()
+
+```
+
+Line graph of no. doc. for each category
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Initiatives/line_graph.png"),width = 1500, height = 1500)
+
+doc_cat_2 %>%
+  group_by(StartDateYear,assigned_category) %>%
+  drop_na(StartDateYear) %>%
+  summarise(N = n()) %>%
+  filter(assigned_category != 'Both') %>%
+
+  ggplot(aes(x=StartDateYear,y=N, group = assigned_category, linetype = assigned_category)) +
+  geom_line(aes(color = assigned_category))+
+  geom_point(aes(color = assigned_category)) +
+  xlab("Year") +
+  ylab("Number of policy initiatives") +
+   theme(axis.text.x = element_text(size = 20,angle = 45),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30)
+         ) 
+
+
+#dev.off()
+```
+
+Cumulative TFIDF of doc in each category
+```{r}
+#doc_cat has tfidf. Use the assigned_category from doc_cat_2
+doc_cat %>% select(-assigned_category) %>%
+  left_join(doc_cat_2 %>% select(doc_id,assigned_category), by = 'doc_id') %>% 
+  
+  filter(assigned_category != 'Both') %>%
+  group_by(StartDateYear) %>% 
+  drop_na(StartDateYear) %>%
+  summarise(sum_tfidf_cocreate = sum(Tfidf_cocreate_sum),
+            sum_tfidf_KT = sum(Tfidf_KT_sum)) %>%
+  pivot_longer(2:3,values_to = 'tfidf', names_to = 'category') %>%
+  ggplot(aes(x=StartDateYear,y=tfidf, group = category, linetype = category)) +
+  geom_line()
+```
+
+```{r}
+#library(survival)
+#library(survminer) #For colorful survival plot use with ggsurvplot()
+#png(filename = paste0( getwd(), "/Plots/Keywords/Survival_1.png"),width = 700, height = 700)
+
+survival <- doc_cat_2 %>% select(1:15) %>% 
+  filter(assigned_category != 'Both') %>%
+  #status = 1 = censored (year_length is NA); = 2 = dead.
+  mutate(status = case_when(is.na(year_length) == TRUE ~ 1,
+                            is.na(year_length) == FALSE ~ 2)) %>%
+  mutate(StartDateYear = as.numeric(StartDateYear),
+         EndDateYear = as.numeric(EndDateYear)) 
+
+sfit <- survfit(Surv(survival$year_length,survival$status)~assigned_category, data=survival)
+#summary(sfit, times=seq(0, 100, 5))
+ggsurvplot(sfit,conf.int=TRUE, pval=TRUE, risk.table=TRUE, 
+           legend.labs=c("Co-creation", "Knowledge Transfer"), legend.title="Category",  
+           palette=c("dodgerblue2", "orchid2"), 
+           title="Kaplan-Meier Curve for length of project", 
+           risk.table.height=.15)
+
+#dev.off()
+```
+
+### Network visualization of topics
+Create a dataframe for network plotting
+```{r}
+Keyword <- All_cloud %>% as.data.frame()
+Keyword_co <- Co_cloud %>% as.data.frame() 
+Keyword_KT <- KT_cloud %>% as.data.frame() 
+Keyword_NT <- NT_cloud %>% as.data.frame() 
+```
+
+```{r}
+Keyword_matrix <- Keyword[,2:566] %>% as.matrix()
+Co_matrix <- Keyword_co[,2:389] %>% as.matrix()
+KT_matrix <- Keyword_KT[,2:451] %>% as.matrix()
+NT_matrix <- Keyword_NT[,2:430] %>% as.matrix()
+
+#Change row names into the corresponding InitiativeID
+ID <- Keyword$doc_id
+rownames(Keyword_matrix) <- ID
+
+ID2 <- Keyword_co$doc_id
+rownames(Co_matrix) <- ID2
+
+ID3 <- Keyword_KT$doc_id
+rownames(KT_matrix) <- ID3
+
+ID4 <- Keyword_NT$doc_id
+rownames(NT_matrix) <- ID4
+```
+
+```{r}
+m_key_key <- Keyword_matrix %>% crossprod()
+m_key_co <- Co_matrix %>% crossprod()
+m_key_kt <- KT_matrix %>% crossprod()
+m_key_nt <- NT_matrix %>% crossprod()
+
+m_key_key[1:10,1:10] #first 10 rows
+m_key_co[1:10,1:10]
+```
+
+```{r}
+g_key <- m_key_key %>% as_tbl_graph(directed = FALSE) %N>%
+  filter(!node_is_isolated()) %N>%
+#Focus on nodes which have high connections/edges
+  mutate(dgr = centrality_eigen(weights = weight))  %N>%
+  filter(dgr > 0.02) %N>%
+#Join with the assigned category
+  left_join(Keyword_categories, by = 'name')
+
+
+g_co <- m_key_co %>% as_tbl_graph(directed = FALSE) %N>%
+  filter(!node_is_isolated()) %N>%
+#Focus on nodes which have high connections/edges
+  mutate(dgr = centrality_eigen(weights = weight))  %N>%
+  filter(dgr > 0.03) %N>%
+#Join with the assigned category
+  left_join(Keyword_categories, by = 'name')
+
+g_kt <- m_key_kt %>% as_tbl_graph(directed = FALSE) %N>%
+  filter(!node_is_isolated()) %N>%
+#Focus on nodes which have high connections/edges
+  mutate(dgr = centrality_eigen(weights = weight))  %N>%
+  filter(dgr > 0.05) %N>%
+#Join with the assigned category
+  left_join(Keyword_categories, by = 'name')
+```
+
+```{r}
+#fix the coordinates
+coords_tech_key <- g_kt %>% igraph::layout.fruchterman.reingold() %>% as_tibble(.name_repair = 'unique')
+colnames(coords_tech_key) <- c("x", "y")
+```
+
+```{r}
+tmp <- tempfile() #Run a temporary file and use rsvg_png to save the .png file in your directory file
+svglite(tmp, width = 100, height = 100)
+
+g_co %>%
+  ggraph(layout = coords_tech_key) + 
+  geom_edge_link(aes(width = weight), alpha = 1, colour = "grey") + 
+  geom_node_point(aes(color = assigned_category,size = Tfidf_cocreate), alpha = 1)  + 
+  geom_node_text(aes(label = name, size = Total_doc), repel = TRUE) +
+  theme_graph()+
+  coord_fixed()+
+  theme(legend.text = element_text(size =  100), #changing legend text size
+        legend.title = element_text(size = 100, face = "bold"),#changing legend title size
+        plot.title = element_text(size=100))+
+  scale_size_continuous( breaks = c(1,10,20,30,40,50,60,70, 80),
+              range = c(5, 50)) + #adjust relative node size
+  guides(colour = guide_legend(override.aes = list(size=60))) + #changing legend symbol size
+  labs(title =paste('dgr > 0.03'),
+       subtitle = '')
+
+
+dev.off()
+
+rsvg::rsvg_png(tmp,"Network_co_2.png")
+
+```
+
+```{r}
+tmp <- tempfile() #Run a temporary file and use rsvg_png to save the .png file in your directory file
+svglite(tmp, width = 100, height = 100)
+
+g_kt %>%
+  ggraph(layout = coords_tech_key) + 
+  geom_edge_link(aes(width = weight), alpha = 1, colour = "grey") + 
+  geom_node_point(aes(color = assigned_category,size = Tfidf_cocreate), alpha = 1)  + 
+  geom_node_text(aes(label = name, size = Total_doc), repel = TRUE) +
+  theme_graph()+
+  coord_fixed()+
+  theme(legend.text = element_text(size =  100), #changing legend text size
+        legend.title = element_text(size = 100, face = "bold"),#changing legend title size
+        plot.title = element_text(size=100))+
+  scale_size_continuous( breaks = c(1,10,20,30,40,50,60,70, 80,90,100),
+              range = c(5, 50)) + #adjust relative node size
+  guides(colour = guide_legend(override.aes = list(size=60))) + #changing legend symbol size
+  labs(title =paste('dgr > 0.05'),
+       subtitle = '')
+
+
+dev.off()
+
+rsvg::rsvg_png(tmp,"Network_kt_2.png")
+```
+
+#5. Policy text analysis of Co-creation and Knowledge Transfer policies 
+Create N-grams wordcloud for each assigned_category
+```{r}
+##Remove NA and <br/> in all_texts by adding 'NA' in the stop words so that it can be removed
+stop_words %<>% rbind(word = 'na', word = 'br')
+#Preprocessing 'Co-creation'
+doc_cat_2 %>%
+  filter(assigned_category == 'Co-creation') %>%
+#Bi-grams (change word --> bigram and token = 'words' to = 'ngrams' with n = X)
+  unnest_tokens(word, all_texts, token = 'words') %>%
+  anti_join(stop_words, by = 'word') %>%
+#Stemming
+  mutate(stem = wordStem(word)) %>%
+  count(word) %>%
+#Wordcloud
+  with(wordcloud(word, n, 
+                 max.words = 50, 
+                 color = "blue"))
+```
+
+```{r}
+all_texts <- as.data.frame(doc_cat_2$all_texts)
+```
+
+## 5.1 Bigram
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Texts/Cocreate_bigram.png"),width = 800, height = 800)
+#Preprocessing 'Co-creation'
+doc_cat_2 %>%
+  filter(assigned_category == 'Co-creation') %>%
+#Bi-grams (change word --> bigram and token = 'words' to = 'ngrams' with n = X)
+  unnest_tokens(bigram, all_texts, token = 'ngrams',n=2) %>%
+#Remove stopwords by separating into two words
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  anti_join(stop_words, by = c('word1' = 'word')) %>%
+  anti_join(stop_words, by = c('word2' = 'word')) %>%
+# Con't remove stopwords but unit them again
+  unite(bigram, word1, word2, sep = " ") %>%
+#Stemming
+  mutate(stem = wordStem(bigram)) %>%
+  count(bigram) %>%
+#Wordcloud
+  with(wordcloud(bigram, n, 
+                 max.words = 50, 
+                 color = "blue"))
+
+mtext("Cocreation",
+      side=3, 
+      line=1, 
+      at= 0.5, 
+      adj= 0.5, 
+      cex=3) 
+#dev.off()
+
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Texts/Knowledge_Transfer_bigram.png"),width = 800, height = 800)
+doc_cat_2 %>%
+  filter(assigned_category == 'Knowledge Transfer') %>%
+#Bi-grams (change word --> bigram and token = 'words' to = 'ngrams' with n = X)
+  unnest_tokens(bigram, all_texts, token = 'ngrams',n=2) %>%
+#Remove stopwords by separating into two words
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  anti_join(stop_words, by = c('word1' = 'word')) %>%
+  anti_join(stop_words, by = c('word2' = 'word')) %>%
+# Con't remove stopwords but unit them again
+  unite(bigram, word1, word2, sep = " ") %>%
+#Stemming
+  mutate(stem = wordStem(bigram)) %>%
+  count(bigram) %>%
+#Wordcloud Top 50 words
+  with(wordcloud(bigram, n, 
+                 max.words = 30, 
+                 color = "blue"))
+
+mtext("Knowledge Transfer",
+      side=3, 
+      line=1, 
+      at= 0.5, 
+      adj= 0.5, 
+      cex=3) 
+
+#dev.off()
+
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Texts/Overlap_bigram.png"),width = 800, height = 800)
+doc_cat_2 %>%
+  filter(assigned_category == 'Both') %>%
+#Bi-grams (change word --> bigram and token = 'words' to = 'ngrams' with n = X)
+  unnest_tokens(bigram, all_texts, token = 'ngrams',n=2) %>%
+#Remove stopwords by separating into two words
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  anti_join(stop_words, by = c('word1' = 'word')) %>%
+  anti_join(stop_words, by = c('word2' = 'word')) %>%
+# Con't remove stopwords but unit them again
+  unite(bigram, word1, word2, sep = " ") %>%
+#Stemming
+  mutate(stem = wordStem(bigram)) %>%
+  count(bigram) %>%
+#Wordcloud Top 50 words
+  with(wordcloud(bigram, n, 
+                 max.words = 30, 
+                 color = "blue"))
+
+#dev.off()
+```
+
+## 5.2 Trigram
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Texts/Cocreate_trigram.png"),width = 1000, height = 1000)
+#Preprocessing 'Co-creation'
+doc_cat_2 %>%
+  filter(assigned_category == 'Co-creation') %>%
+#Bi-grams (change word --> bigram and token = 'words' to = 'ngrams' with n = X)
+  unnest_tokens(trigram, all_texts, token = 'ngrams',n=3) %>%
+#Remove stopwords by separating into 3 words
+  separate(trigram, c("word1", "word2","word3"), sep = " ") %>%
+  anti_join(stop_words, by = c('word1' = 'word')) %>%
+  anti_join(stop_words, by = c('word2' = 'word')) %>%
+  anti_join(stop_words, by = c('word3' = 'word')) %>%
+# Con't remove stopwords but unit them again
+  unite(trigram, word1, word2,word3, sep = " ") %>%
+#Stemming
+  mutate(stem = wordStem(trigram)) %>%
+  count(trigram, sort = TRUE) %>%
+#Wordcloud
+  with(wordcloud(trigram, n, 
+                 max.words = 30, 
+                 color = "blue"))
+
+mtext("Co-creation",
+      side=3, 
+      line=1, 
+      at= 0.5, 
+      adj= 0.5, 
+      cex=3) 
+
+#dev.off()
+```
+
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Texts/Knowledge_Transfer_trigram.png"),width = 1000, height = 1000)
+#Preprocessing 'Co-creation'
+doc_cat_2 %>%
+  filter(assigned_category == 'Knowledge Transfer') %>%
+#Bi-grams (change word --> bigram and token = 'words' to = 'ngrams' with n = X)
+  unnest_tokens(trigram, all_texts, token = 'ngrams',n=3) %>%
+#Remove stopwords by separating into 3 words
+  separate(trigram, c("word1", "word2","word3"), sep = " ") %>%
+  anti_join(stop_words, by = c('word1' = 'word')) %>%
+  anti_join(stop_words, by = c('word2' = 'word')) %>%
+  anti_join(stop_words, by = c('word3' = 'word')) %>%
+# Con't remove stopwords but unit them again
+  unite(trigram, word1, word2,word3, sep = " ") %>%
+#Stemming
+  mutate(stem = wordStem(trigram)) %>%
+  count(trigram, sort = TRUE) %>%
+#Wordcloud
+  with(wordcloud(trigram, n, 
+                 max.words = 30, 
+                 color = "blue"))
+
+mtext("Knowledge Transfer",
+      side=3, 
+      line=1, 
+      at= 0.5, 
+      adj= 0.5, 
+      cex=3) 
+#dev.off()
+```
+
+Which countries have higher % co-creation policies?
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Initiatives/By_countries.png"),width = 2000, height = 2000)
+
+
+doc_cat_2 %>%
+  group_by(CountryLabel,assigned_category) %>%
+  summarise(N = n()) %>%
+
+  #calculate total initiatives(Both+Co-create+Knowledge Transfer)
+  left_join(doc_cat_2 %>%
+  group_by(CountryLabel) %>%
+  summarise(Total_initiatives = n()), by = 'CountryLabel') %>%
+  
+  
+  #Calculate proportional differences
+  group_by(CountryLabel) %>%
+  filter(assigned_category != 'Both') %>%
+  summarise(Diff_p = 100*diff(N)/Total_initiatives) %>%
+  distinct(CountryLabel, .keep_all = TRUE) %>%
+  #Make category again so that you can them the same color in fill = 
+  mutate(Category = ifelse(Diff_p < 0,"co-create", "knowledge transfer")) %>%
+  ungroup() %>%
+
+ggplot(aes(x=reorder(CountryLabel,Diff_p),y=Diff_p,fill=Category)) +
+  geom_bar(stat = "identity") +
+  xlab("Countries") +
+  ylab("Difference in proportion of policy initiatives (%)") +
+  scale_fill_discrete(name="Category ",
+                      labels = c("Co-create", "Knowledge Transfer")) +
+  scale_fill_manual(values = c("#00ba38","#0b8fd3")) +
+   theme(axis.text.x = element_text(size = 30,angle =0),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30)
+         ) +
+  coord_flip()
+#dev.off()
+```
+
+## 5.3 Diversity
+### 5.3.1 Diversity of the target groups?
+1) Number of target groups per each category
+```{r}
+doc_cat_2 %>%
+  group_by(doc_id,assigned_category) %>%
+  pivot_longer(100:130, names_to = 'Target_group', values_to = 'presence') %>%
+  filter(presence == 1) %>%
+  summarise(N = n()) %>%
+  ungroup() %>%
+  group_by(assigned_category) %>%
+  summarise(avr_num_actors = mean(N)) %>%
+  kbl(longtable = T, booktabs = T) %>%
+  kable_classic(full_width = F,font_size = 50) %>%
+  column_spec(2, width = "8m") %>%
+  save_kable("average_actors.png", self_contained = T)
+  
+```
+
+```{r}
+doc_cat_2 %>%
+  group_by(doc_id,assigned_category) %>%
+  pivot_longer(100:130, names_to = 'Target_group', values_to = 'presence') %>%
+  filter(presence == 1) %>%
+  summarise(num_TG = n()) %>%
+  ungroup() %>%
+  group_by(assigned_category) %>%
+  summarise(avr_num_actors = mean(num_TG),
+            sd_num_actors = sd(num_TG)) %>%
+  ggplot() +
+  geom_bar(aes(x = assigned_category, y = avr_num_actors), stat="identity", alpha=0.5)+
+    geom_errorbar(aes(x=assigned_category, ymin=avr_num_actors-sd_num_actors, ymax=avr_num_actors+sd_num_actors), width=0.4, colour="orange", alpha=0.9, size=1.3)
+```
+
+2) Top countries in each category 
+```{r}
+#Re-arranged by combining some 'TG's into a bigger category according to STIP classification of target groups
+Cocreate_actors <- doc_cat_2 %>%
+  select(doc_id,TG9,TG10,TG11,TG12,TG13,TG14,TG15,TG16,TG17,TG18,TG19,TG20,TG21,TG22,TG23,TG24,TG25,TG26,TG27,TG28,TG29,TG30,TG31,TG32,TG33,TG34,TG35,TG36,TG37,TG38,TG40) %>% 
+  mutate_if(is.character, as.numeric) %>%
+  rowwise() %>%
+  mutate(REO = sum(c_across(TG20:TG22)),
+         RST = sum(c_across(TG9:TG13),TG38),
+         FS = sum(c_across(TG29:TG33)),
+         FA = sum(c_across(TG25:TG28)),
+         INT = sum(c_across(TG34:TG37)),
+         GOV = sum(TG23,TG24,TG40),
+         ECON = sum(c_across(TG18:TG19)),
+         SOC = sum(c_across(TG14:TG16))
+         ) %>%
+  select(!starts_with("TG")) %>%
+  left_join(doc_cat_2, by = c('doc_id')) %>%
+
+#Calculate nubmer of actors in each category per each country
+  filter(assigned_category == 'Co-creation') %>%
+  group_by(CountryLabel) %>%
+  summarise(mean_actors_REO = mean(REO),
+            mean_actors_RST = mean(RST),
+            mean_actors_FS = mean(FS),
+            mean_actors_FA = mean(FA),
+            mean_actors_INT = mean(INT),
+            mean_actors_GOV = mean(GOV),
+            mean_actors_ECON = mean(ECON),
+            mean_actors_SOC = mean(SOC)) 
+
+
+Cocreate_actors %>% arrange(desc(mean_actors_REO)) %>% select(CountryLabel,mean_actors_REO) %>% head(5) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_RST)) %>% select(CountryLabel,mean_actors_RST) %>% head(5)) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_FS)) %>% select(CountryLabel,mean_actors_FS) %>% head(5)) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_FA)) %>% select(CountryLabel,mean_actors_FA) %>% head(5)) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_INT)) %>% select(CountryLabel,mean_actors_INT) %>% head(5)) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_GOV)) %>% select(CountryLabel,mean_actors_GOV) %>% head(5)) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_ECON)) %>% select(CountryLabel,mean_actors_ECON) %>% head(5)) %>%
+  cbind(Cocreate_actors %>% arrange(desc(mean_actors_SOC)) %>% select(CountryLabel,mean_actors_SOC) %>% head(5)) %>%
+  kbl() %>%
+  kable_classic(full_width = F,font_size = 20) %>%
+  save_kable("actors_cocreate.png")
+
+```
+
+```{r}
+#Re-arranged by combining some 'TG's into a bigger category according to STIP classification of target groups
+KT_actors <- doc_cat_2 %>%
+  select(doc_id,TG9,TG10,TG11,TG12,TG13,TG14,TG15,TG16,TG17,TG18,TG19,TG20,TG21,TG22,TG23,TG24,TG25,TG26,TG27,TG28,TG29,TG30,TG31,TG32,TG33,TG34,TG35,TG36,TG37,TG38,TG40) %>% 
+  mutate_if(is.character, as.numeric) %>%
+  rowwise() %>%
+  mutate(REO = sum(c_across(TG20:TG22)),
+         RST = sum(c_across(TG9:TG13),TG38),
+         FS = sum(c_across(TG29:TG33)),
+         FA = sum(c_across(TG25:TG28)),
+         INT = sum(c_across(TG34:TG37)),
+         GOV = sum(TG23,TG24,TG40),
+         ECON = sum(c_across(TG18:TG19)),
+         SOC = sum(c_across(TG14:TG16))
+         ) %>%
+  select(!starts_with("TG")) %>%
+  left_join(doc_cat_2, by = c('doc_id')) %>%
+
+#Calculate nubmer of actors in each category per each country
+  filter(assigned_category == 'Knowledge Transfer') %>%
+  group_by(CountryLabel) %>%
+  summarise(mean_actors_REO = mean(REO),
+            mean_actors_RST = mean(RST),
+            mean_actors_FS = mean(FS),
+            mean_actors_FA = mean(FA),
+            mean_actors_INT = mean(INT),
+            mean_actors_GOV = mean(GOV),
+            mean_actors_ECON = mean(ECON),
+            mean_actors_SOC = mean(SOC)) 
+  
+KT_actors %>% arrange(desc(mean_actors_REO)) %>% select(CountryLabel,mean_actors_REO) %>% head(5) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_RST)) %>% select(CountryLabel,mean_actors_RST) %>% head(5)) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_FS)) %>% select(CountryLabel,mean_actors_FS) %>% head(5)) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_FA)) %>% select(CountryLabel,mean_actors_FA) %>% head(5)) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_INT)) %>% select(CountryLabel,mean_actors_INT) %>% head(5)) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_GOV)) %>% select(CountryLabel,mean_actors_GOV) %>% head(5)) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_ECON)) %>% select(CountryLabel,mean_actors_ECON) %>% head(5)) %>%
+  cbind(KT_actors %>% arrange(desc(mean_actors_SOC)) %>% select(CountryLabel,mean_actors_SOC) %>% head(5)) %>%
+  kbl() %>%
+  kable_classic(full_width = F,font_size = 20) %>%
+  save_kable("actors_KT.png")
+```
+
+### 5.3.2 Diversity of the themes?
+1) Number of themes per each category
+```{r}
+
+doc_cat_2 %>%
+  group_by(doc_id,assigned_category) %>%
+  pivot_longer(48:99, names_to = 'Themes', values_to = 'presence') %>%
+  filter(presence == 1) %>%
+  summarise(num_themes = n_distinct(Themes)) %>%
+  ungroup() %>%
+  group_by(assigned_category) %>%
+  summarise(avr_num_themes = mean(num_themes)) %>%
+  kbl(longtable = T, booktabs = T) %>%
+  kable_classic(full_width = F,font_size = 50) %>%
+  column_spec(2, width = "8m") %>%
+  save_kable("/Plots/Initiatives/average_themes.png", self_contained = T)
+  
+```
+
+2) Top 10 countries in each category
+```{r}
+#Co-creation
+doc_cat_2 %>%
+  #Calculate number of distinct themes for each country across all years (past til present) per each document
+  group_by(doc_id,assigned_category,CountryLabel) %>%
+  pivot_longer(48:99, names_to = 'Themes', values_to = 'presence') %>%
+  filter(presence == 1,assigned_category == 'Co-creation')  %>%
+  summarise(num_themes = n_distinct(Themes)) %>%
+  #Calculate average number of distinct themes of all the documents for each country across all years (past til present)
+  group_by(CountryLabel) %>%
+  summarise(mean_themes = mean(num_themes)) %>%
+  arrange(desc(mean_themes)) %>%
+  head(10) %>%
+  
+  kbl(longtable = T) %>%
+  kable_classic(full_width = F,font_size = 50) %>%
+  save_kable("Themes_Cocreate.png")
+
+```
+
+```{r}
+#Knowledge Transfer
+doc_cat_2 %>%
+  #Calculate number of distinct themes for each country across all years (past til present) per each document
+  group_by(doc_id,assigned_category,CountryLabel) %>%
+  pivot_longer(48:99, names_to = 'Themes', values_to = 'presence') %>%
+  filter(presence == 1,assigned_category == 'Knowledge Transfer')  %>%
+  summarise(num_themes = n_distinct(Themes)) %>%
+  #Calculate average number of distinct themes of all the documents for each country across all years (past til present)
+  group_by(CountryLabel) %>%
+  summarise(mean_themes = mean(num_themes)) %>%
+  arrange(desc(mean_themes)) %>%
+  head(10)%>%
+  kbl() %>%
+  kable_classic(full_width = F,font_size = 50) %>%
+  save_kable("Themes_KT.png")
+
+```
+
+3) Compare avr. no. themes within the same countries
+```{r}
+theme_country <- doc_cat_2 %>%
+  group_by(doc_id,assigned_category,CountryLabel) %>%
+  pivot_longer(48:99, names_to = 'Themes', values_to = 'presence') %>%
+  filter(presence == 1,assigned_category == 'Co-creation')  %>%
+  summarise(num_themes = n_distinct(Themes)) %>%
+  group_by(CountryLabel) %>%
+  summarise(total_themes = sum(num_themes),
+            mean_themes = mean(num_themes)) %>%
+  mutate(Category = 'Co-creation') %>%
+  
+  #join with knowledge transfer 
+  rbind(doc_cat_2 %>%
+  group_by(doc_id,assigned_category,CountryLabel) %>%
+  pivot_longer(48:99, names_to = 'Themes', values_to = 'presence') %>%
+  filter(presence == 1,assigned_category == 'Knowledge Transfer')  %>%
+  summarise(num_themes = n_distinct(Themes)) %>%
+  group_by(CountryLabel) %>%
+  summarise(total_themes = sum(num_themes),
+            mean_themes = mean(num_themes)) %>%
+  mutate(Category = 'Knowledge Transfer')) %>%
+
+theme_country %>% filter(Category == 'Co-creation') %>% arrange(CountryLabel) %>%
+  head(10)%>%
+  kbl() %>%
+  kable_classic(full_width = F,font_size = 50) %>%
+  save_kable("Themes_Cocreate_countries_comparison.png")
+
+```
+
+```{r}
+theme_country %>% filter(Category == 'Knowledge Transfer') %>% arrange(CountryLabel) %>% arrange(CountryLabel) %>%
+  head(10)%>%
+  kbl() %>%
+  kable_classic(full_width = F,font_size = 50) %>%
+  save_kable("Themes_KT_countries_comparison.png")
+```
+
+Bar plot of above themes data 
+```{r}
+
+theme_country %>%
+  group_by(Category) %>%
+  summarise(avr_themes = mean(mean_themes),
+            stdv = sd(mean_themes)) %>%
+  ggplot() +
+  geom_bar(aes(x = Category, y = avr_themes), stat="identity", alpha=0.5)+
+    geom_errorbar(aes(x=Category, ymin=avr_themes-stdv, ymax=avr_themes+stdv), width=0.4, colour="orange", alpha=0.9, size=1.3)
+```
+
+4) Average no. themes in 2021: Which countries do most co-creation this year (2021)? 
+```{r}
+doc_cat_2 %>%
+  filter(StartDateYear == 2021) %>%
+  group_by(doc_id,assigned_category,CountryLabel) %>%
+  pivot_longer(48:99, names_to = 'Themes', values_to = 'presence') %>%
+  filter(presence == 1,assigned_category == 'Co-creation') %>%
+  summarise(num_themes = n()) %>%
+  group_by(CountryLabel) %>%
+  summarise(mean_themes = mean(num_themes)) %>%
+  arrange(desc(mean_themes))
+```
+
+### 5.3.3 Length of implementation
+Average length of year implemented: 
+```{r}
+doc_cat_2 %>%
+  group_by(assigned_category) %>%
+  summarise(avr_length = mean(year_length, na.rm = TRUE))
+```
+
+### 5.3.4 Yearly Budget range?
+The weight is based on suggestion from STIP
+```{r}
+doc_cat_2 %<>%
+  mutate(budget_weight = case_when(YearlyBudgetRange == "Unknown" | YearlyBudgetRange == "Not applicable"~ 0,
+                                   YearlyBudgetRange == "Less than 1M" ~ 0.005,
+                                   YearlyBudgetRange == "1M-5M" ~ 0.01,
+                                   YearlyBudgetRange == "5M-20M" ~ 0.05,
+                                   YearlyBudgetRange == "20M-50M" ~ 0.2,
+                                   YearlyBudgetRange == "50M-100M" ~ 0.5,
+                                   YearlyBudgetRange == "100M-500M" ~ 1,
+                                   YearlyBudgetRange == "More than 500M" ~ 5)) %>%
+  relocate(budget_weight, .after = YearlyBudgetRange)
+
+```
+
+Budget allocated to each category across year (negative is co-creation)
+Note: It may not be a good idea to plot the average budget across year because each country may allocate different amount of resources and budget in every year, and each year, there may be different number of countries putting up the policy initiatives. SO it's better to plot it against the countries to control for the individual heterogeneity - It's harder to know whether there's time heterogeneity, but differences between countries are more obvious (See more explanation on the next diagram). Nevertheless, below plot is just an example. 
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Initiatives/Budget_year.png"),width = 2000, height = 2000)
+
+#Calculate the average weight of the budget allocated to policies in each country across all years
+doc_cat_2 %>%
+  group_by(StartDateYear,assigned_category) %>%
+  summarise(num_policy = n(),
+            sum_budget_weight = sum(1+budget_weight),
+            avr_budget_weight = sum_budget_weight/num_policy) %>%
+
+#Calculate the weight differences
+  group_by(StartDateYear) %>%
+  filter(assigned_category != 'Both') %>%
+  summarise(Diff_budget_weight = diff(avr_budget_weight)) %>%
+  drop_na(StartDateYear) %>%
+  ggplot() +
+  geom_bar(aes(x = StartDateYear, y = Diff_budget_weight,fill = StartDateYear), stat="identity", alpha=1)+
+  xlab("Category") +
+  ylab("DIfference in Budget weight") +
+  theme(axis.text.x = element_text(size = 30,angle =0),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30),
+         legend.position = 'none'
+         ) +
+    coord_flip()
+
+#dev.off()
+```
+Budget allocated to each category across countries. 
+- This one assumes that every country is affected by the same crisis, e.g. financial crisis, COVID, etc. So the heterogeneity may be consistent. 
+- However, this does not take into account the other effect such as country with high GDP like China or Western in which investment on the policy/project can be much more. Nor does it account for crisis happened in individual country such as flood or other disasters. 
+```{r}
+#png(filename = paste0( getwd(), "/Plots/Initiatives/Budget_countries.png"),width = 2000, height = 2000)
+
+  #Calculate the average weight of the budget allocated to policies in each country across all years
+doc_cat_2 %>%
+  group_by(CountryLabel,assigned_category) %>%
+  summarise(num_policy = n(),
+            sum_budget_weight = sum(1+budget_weight),
+            avr_budget_weight = sum_budget_weight/num_policy) %>%
+
+  #Calculate the weight differences
+  group_by(CountryLabel) %>%
+  filter(assigned_category != 'Both') %>%
+  summarise(Diff_budget_weight = diff(avr_budget_weight)) %>%
+
+  #Make category again so that you can them the same color in fill = 
+  mutate(Category = ifelse(Diff_budget_weight < 0,"co-create", "knowledge transfer")) %>%
+  ungroup() %>%
+  
+  ggplot() +
+  geom_bar(aes(x = reorder(CountryLabel,Diff_budget_weight), y = Diff_budget_weight, fill = Category), stat="identity", alpha=1)+
+  xlab("Category") +
+  ylab("DIfference in Budget weight") +
+  scale_fill_discrete(name="Category ",
+                      labels = c("Co-create", "Knowledge Transfer")) +
+  scale_fill_manual(values = c("#00ba38","#0b8fd3")) +
+  theme(axis.text.x = element_text(size = 30,angle =0),
+         axis.text.y = element_text(size = 30),
+         axis.title.x = element_text(size = 35),
+         axis.title.y = element_text(size = 35),
+         legend.title = element_text(size = 35),
+         legend.text = element_text(size = 30),
+         legend.position = 'none'
+         ) +
+    coord_flip()
+
+#dev.off()
+```
+
