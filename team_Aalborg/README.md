@@ -5,7 +5,7 @@ Below a brief intro to the folder structure
 1. Data: The data we used
 2. R: R notebooks we created
 3. Python: Python notebooks we created
-4. Output: All outputs created, plus a brief manuual how to use them
+4. Output: All outputs created, plus a brief manual how to use them
 
 
 
