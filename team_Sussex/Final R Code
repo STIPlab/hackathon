@@ -1,0 +1,2637 @@
+
+
+
+setwd("OECD/R_code")
+if (!require(quanteda)){install.packages('quanteda')}
+if (!require(quanteda.textplots)){install.packages('quanteda.textplots')}
+if (!require(quanteda.textstats)){install.packages('quanteda.textstats')}
+if (!require(tidyverse)){install.packages('tidyverse')} 
+if (!require(cluster)){install.packages('cluster')} 
+if (!require(ggpubr)){install.packages('ggpubr')} 
+if (!require(factoextra)){install.packages('factoextra')} 
+
+
+url <- 'https://stip.oecd.org/assets/downloads/STIP_Survey.csv'
+
+#download the dataset
+download.file(url, destfile = 'stip.csv', mode = 'wb')
+
+stip <- read_delim('stip.csv', '|', escape_double = FALSE, trim_ws = TRUE)
+
+#Most columns with info on instruments start with the Letter 'F' followed by a number. this removes all columns matching these characteristics
+stip <- stip[,!grepl('^[F][0-9]', (names(stip)))]
+
+#There are a few more columns with information on instruments. We remove them, too for the sake of coherence
+stip <- stip[,!grepl('Instrument', (names(stip)))]
+
+#This code identifies unique Initiative IDs. When multiple rows have the same initiative IDs, it retains only one of them. Since we have already removed all the information on instruments, no information is lost by retaining each initiative only once
+stip <- stip %>%
+  distinct(InitiativeID, .keep_all = T)
+
+############
+codebook <- as.data.frame(t(stip[1,])) %>%
+  rownames_to_column()
+
+names(codebook) <- c('Variable', 'Code')
+
+#...remove the first row from the dataset: 
+stip <- stip[-1, ]
+
+#take a look at the codebook
+head(codebook) #The first few variables names are mostly self-explanatory 
+
+tail(codebook) #For other variables, the codebook is instructive (note that 'TG' stands for 'Target Group')
+
+
+#######
+stip <- stip %>%
+  mutate(InitiativeID = as.factor(gsub('http://stip.oecd.org/2021/data/policyInitiatives/', '', InitiativeID)))
+
+stip$InitiativeID <- as.numeric(as.character(stip$InitiativeID))
+
+
+
+
+
+
+###### 3 Quantitative text analysis
+#this creates a vector with the names of all columns we wish to unite
+cols <- c('ShortDescription', names(stip)[grepl('Objectives', names(stip))])
+
+#this unites these columns in the new column 'all_texts'
+stip$all_texts <- apply(stip[ ,cols], 1, paste, collapse = ' ')
+
+#take a look at the first few new documents (i.e. the pieces of textual data that we will analyse)
+head(stip$all_texts, 3)
+
+
+#3.1 Prepare and pre-process textual data
+
+stip_corp <- corpus(stip, docid_field = 'InitiativeID', text_field = 'all_texts')
+
+#take a look
+stip_corp
+
+
+#Next, we create a document-feature matrix (dfm) from the corpus. 
+#Many techniques of quantitative text analysis use a dfm as their input. 
+#In the dfm, each row is a document, and each column is a word. 
+#Cells indicate the number of times a word appears in a document. 
+#The dfm does not retain the order of words in document. 
+#Rather, it treats documents as bags of words. 
+#After creating the dfm, we remove numbers and english 
+#stopwords which are short function words (such as 'to', 'and', 'or'). We also remove all words with less than 3 characters.
+
+
+
+stip_dfm <- dfm(stip_corp)
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+
+stip_dfm  <- stip_dfm %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_docfreq = 0.01,  docfreq_type = 'prop') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(stip_dfm) >= 10) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+stip_dfm
+
+#install.packages('tokenizers')
+library('tokenizers')
+tag_dfm <- tokenizers::tokenize_regex(stip$Tags, pattern = '¬') %>%
+  as.tokens() %>%
+  dfm() %>%
+  dfm_remove(min_nchar = 3)
+
+rownames(tag_dfm) <- stip$InitiativeID
+docvars(tag_dfm) <- stip
+
+
+
+
+###### 1. Descriptive Analysis ######
+###### 1.1 HR proportion of the all policy proposal across countries #####
+# adjust the format of data, from factor to numeric
+#stip1_group <- stip1 %>%
+#  group_by(CountryCode) %>%
+#  summarise(numb = sum(TH50))
+library('scales')
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 | stip$TG11==1 | stip$TG12==1
+                     | stip$TG9==1, 1, 0))
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(num_all = n(), num_hr = sum(HR))
+stip_all_HR_Coun$per <- stip_all_HR_Coun$num_hr/stip_all_HR_Coun$num_all
+
+
+# draw figure number
+stip_all_HR_Coun %>%
+  ggplot(aes(y=reorder(CountryCode,num_hr), x=num_hr))+
+  scale_x_continuous(limits = c(0, NA),expand=c(0,0))+
+  geom_bar(stat="identity", fill = hue_pal()(4)[2], width = 0.6)+
+  ylab("Country")  +xlab("Number of Proposals in STIP related to Human resources for research and innovation")+
+  theme(axis.text.x = element_text( color = "black", size=10),axis.text.y  = element_text(color = "black", size=20))+
+  theme_bw()
+
+ggsave("num_HR_coun.jpg",units = "cm", width = 30, height = 20, dpi = 1000)
+
+
+#Percentage
+stip_all_HR_Coun %>%
+  ggplot(aes(y=reorder(CountryCode,per), x=per))+
+  scale_x_continuous(limits = c(0, NA),expand=c(0,0), labels = scales::percent)+
+  geom_bar(stat="identity", fill = hue_pal()(4)[2], width = 0.6)+
+  ylab("Country")  +xlab("Percentage of Proposals in STIP related to Human resources for research and innovation")+
+  theme(axis.text.x = element_text( color = "black", size=10),axis.text.y  = element_text(color = "black", size=10))+
+  theme_bw()
+
+ggsave("percen_HR_coun.jpg",units = "cm", width = 30, height = 20, dpi = 1000)
+
+
+
+
+
+
+
+###### 1.2 HR Theme proportion of the all policy proposal across countries #####
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH44) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54),
+  ) %>%
+  filter(HR==1)
+
+
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th44 = sum(as.numeric(TH44)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  mutate(th50 = th50/num, th53 = th53/num, th44 = th44/num,
+         th52 = th52/num, th55 = th55/num, th54 = th54/num,
+  )
+
+stip_all_HR_Coun$rank <- rank(-stip_all_HR_Coun$num, ties.method= "first")
+stip_all_HR_Coun <- filter(stip_all_HR_Coun,rank<21)
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -num )
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -rank )
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun %>%
+  ggplot() +
+  geom_bar(aes(x = CountryCode, y = per, fill = Theme),
+           stat = "identity") +
+  labs(x = "country", y = 'percentage') +
+  scale_fill_discrete(name="theme",
+                      breaks=c("th44", "th50", 'th52', "th53" ,'th54',
+                               'th55'),
+                      labels=c("Inter-sectoral mobility", 
+                               "STI human resource strategies", 
+                               "Doctoral and post-doctoral research",
+                               'Research careers',
+                               'Gender balance and inclusiveness',
+                               'International mobility of human resources'))
+
+ggsave("percen_subHR_coun.jpg",units = "cm", width = 30, height = 20, dpi = 1000)
+
+
+
+
+# target group
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse( stip$TG11==1 | stip$TG12==1
+                      | stip$TG9==1, 1, 0), num_tg = as.numeric(stip$TG11) + as.numeric(stip$TG9) + 
+           as.numeric(stip$TG12) ) %>%
+  filter(HR==1)
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(tg11 = sum(as.numeric(TG11)), tg12 = sum(as.numeric(TG12)), tg9 =sum(as.numeric(TG9)),
+            num = sum(num_tg))
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  mutate(tg11 = tg11/num, tg12 = tg12/num, tg9 = tg9/num)
+
+stip_all_HR_Coun$rank <- rank(-stip_all_HR_Coun$num, ties.method= "first")
+stip_all_HR_Coun <- filter(stip_all_HR_Coun,rank<21)
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -num )
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -rank )
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Target_group, per, -CountryCode) 
+
+
+stip_all_HR_Coun %>%
+  ggplot() +
+  geom_bar(aes(x = CountryCode, y = per, fill = Target_group),
+           stat = "identity") +
+  labs(x = "country", y = 'percentage') +
+  scale_fill_discrete(name="theme",
+                      breaks=c('tg11',"tg12",  "tg9"),
+                      labels=c("Postdocs and other early-career researchers",
+                               "PhD students",
+                               
+                               "Established researchers"
+                      ))+
+  geom_text(x = 10, y = 10, label = "fontsize = 10",  size = 10/.pt)
+
+ggsave("percen_subHRtg_coun.jpg",units = "cm", width = 30, height = 20, dpi = 500)
+
+
+
+
+
+
+
+
+###### 1.3 heat map- theme ###### 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH44) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th44 = sum(as.numeric(TH44)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  mutate(th50 = th50/num, th53 = th53/num, th44 = th44/num,
+         th52 = th52/num, th55 = th55/num, th54 = th54/num)
+
+stip_all_HR_Coun$rank <- rank(-stip_all_HR_Coun$num, ties.method= "first")
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -num )
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -rank )
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+
+# Heatmap 
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  mutate(Theme= ifelse(Theme=='th50', 'STI human resource strategies', Theme), Theme= ifelse(Theme=='th53', 'Research careers', Theme),
+         Theme= ifelse(Theme=='th44', 'Inter-sectoral mobility', Theme),
+         Theme= ifelse(Theme=='th52', 'Doctoral and post-doctoral research', Theme),
+         Theme= ifelse(Theme=='th55', 'International mobility of human resources', Theme),
+         Theme= ifelse(Theme=='th54', 'Gender balance and inclusiveness', Theme))
+
+names(stip_all_HR_Coun[,3]) <- 'percentage'
+
+ggplot(stip_all_HR_Coun, aes(Theme, CountryCode, fill= per)) + 
+  geom_tile()+ scale_fill_distiller(palette = "RdPu") 
+
+
+#### heat map - target group 
+# target group
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse( stip$TG11==1 | stip$TG12==1
+                      | stip$TG9==1, 1, 0), num_tg = as.numeric(stip$TG11) + as.numeric(stip$TG9) + 
+           as.numeric(stip$TG12) ) %>%
+  filter(HR==1)
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(tg11 = sum(as.numeric(TG11)), tg12 = sum(as.numeric(TG12)), tg9 =sum(as.numeric(TG9)),
+            num = sum(num_tg))
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  mutate(tg11 = tg11/num, tg12 = tg12/num, tg9 = tg9/num)
+
+stip_all_HR_Coun$rank <- rank(-stip_all_HR_Coun$num, ties.method= "first")
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -num )
+stip_all_HR_Coun <- subset(stip_all_HR_Coun, select = -rank )
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Target_group, per, -CountryCode) 
+
+# Heatmap 
+ggplot(stip_all_HR_Coun, aes(Target_group, CountryCode, fill= per)) + 
+  geom_tile()+ scale_fill_distiller(palette = "RdPu") 
+
+
+
+### heat map funding
+library(readr)
+stip_budget <- read_csv("stip_budget.csv")
+
+stip_budget <- stip_budget %>%
+  mutate(CountryCode = ifelse(stip_budget$CountryCode=='BEBRU' | stip_budget$CountryCode=='BEFED'|
+                                stip_budget$CountryCode=='BEVLG' | stip_budget$CountryCode=='BEWAL' |
+                                stip_budget$CountryCode=='BEWBF', 'BE', stip_budget$CountryCode))
+
+
+stip_all_HR_Coun_bu <- stip_budget %>%
+  mutate(HR = ifelse(stip_budget$TH50==1| stip_budget$TH53==1 | stip_budget$TH44==1
+                     | stip_budget$TH52==1 | stip_budget$TH55==1 |
+                       stip_budget$TH54==1 , 1, 0), num_hr = as.numeric(stip_budget$TH50) + as.numeric(stip_budget$TH53) + 
+           as.numeric(stip_budget$TH44) +  as.numeric(stip_budget$TH52) + as.numeric(stip_budget$TH55) + as.numeric(stip_budget$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun_bu <- stip_all_HR_Coun_bu %>%
+  mutate(th50 = as.numeric(TH50)*(YearlyBudgetWeight/num_hr), th53 =as.numeric(TH53)*(YearlyBudgetWeight/num_hr),
+         th44 = as.numeric(TH44)*(YearlyBudgetWeight/num_hr), th52 = as.numeric(TH52)*(YearlyBudgetWeight/num_hr),
+         th55 = as.numeric(TH55)*(YearlyBudgetWeight/num_hr), th54 = as.numeric(TH54)*(YearlyBudgetWeight/num_hr))
+
+stip_all_HR_Coun_bu <- stip_all_HR_Coun_bu %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(th50)), th53 = sum(as.numeric(th53)), 
+            th44 = sum(as.numeric(th44)), th52= sum(as.numeric(th52)),
+            th55= sum(as.numeric(th55)), th54= sum(as.numeric(th54)),num = sum(YearlyBudgetWeight))
+
+stip_all_HR_Coun_bu <- stip_all_HR_Coun_bu %>%
+  mutate(th50 = th50/num, th53 = th53/num, th44 = th44/num,
+         th52 = th52/num, th55 = th55/num, th54 = th54/num)
+
+stip_all_HR_Coun_bu$rank <- rank(-stip_all_HR_Coun_bu$num, ties.method= "first")
+stip_all_HR_Coun_bu <- subset(stip_all_HR_Coun_bu, select = -num )
+stip_all_HR_Coun_bu <- subset(stip_all_HR_Coun_bu, select = -rank )
+stip_all_HR_Coun_bu <- gather(stip_all_HR_Coun_bu, Theme, per, -CountryCode) 
+
+
+
+# Heatmap 
+stip_all_HR_Coun_bu <- filter(stip_all_HR_Coun_bu, !is.na(per)) %>%
+  mutate(Theme= ifelse(Theme=='th50', 'STI human resource strategies', Theme), Theme= ifelse(Theme=='th53', 'Research careers', Theme),
+         Theme= ifelse(Theme=='th44', 'Inter-sectoral mobility', Theme),
+         Theme= ifelse(Theme=='th52', 'Doctoral and post-doctoral research', Theme),
+         Theme= ifelse(Theme=='th55', 'International mobility of human resources', Theme),
+         Theme= ifelse(Theme=='th54', 'Gender balance and inclusiveness', Theme))
+
+names(stip_all_HR_Coun_bu[,3]) <- 'percentage'
+
+ggplot(stip_all_HR_Coun_bu, aes(Theme, CountryCode, fill= per)) + 
+  geom_tile()+ scale_fill_distiller(palette = "RdPu") + theme(axis.text.x = element_text(size = 15, vjust = 0.5, hjust = 0.5, angle = 45,face = "bold"),
+                                                              axis.text.y = element_text(face = "bold"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#fs_keyness part2 
+
+
+
+
+###### 2. K-mean clustering Analysis ######
+##### 2.1 theme 44 Intersectoral mobility  ######
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH44) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th44 = sum(as.numeric(TH44)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_44 <- filter(stip_all_HR_Coun, Theme=='th44')
+stip_all_HR_Coun_44$rank <- rank(stip_all_HR_Coun_44$per, ties.method= "first")
+
+stip_corp <- corpus(filter(merge(stip_0604,stip_all_HR_Coun_44, by = 'CountryCode'), TH44==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+#write.csv(dfm_countries,'frequ_country_th54.csv', row.names = T)
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+
+
+
+dfm_countries
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+dfm_countries <- dfm_remove(dfm_countries, pattern = c("also" , "within","among", "can", "one", "across", "two" )) # add the word you want to delete 
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+
+
+##### 2.1.1 theme 44 - find k value ######
+
+
+library('cluster')
+# choose the k value 
+dfm_countries.scaled <- scale(as.data.frame(dfm_countries)[, -1])
+fviz_nbclust(dfm_countries.scaled, kmeans, method = "wss") +
+  geom_vline(xintercept = 7, linetype = 2)
+# Average silhouette for kmeans
+fviz_nbclust(dfm_countries.scaled, kmeans, method = "silhouette")
+
+
+### Gap statistic
+library(cluster)
+set.seed(123)
+# Compute gap statistic for kmeans
+# we used B = 10 for demo. Recommended value is ~500
+gap_stat <- clusGap(dfm_countries.scaled, FUN = kmeans, nstart = 25,
+                    K.max = 10, B = 20)
+print(gap_stat, method = "firstmax")
+fviz_gap_stat(gap_stat)
+
+
+
+
+# Compute k-means with k = 2
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 2, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+#### try to visualise
+
+
+
+# Compute k-means with k = 3
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+#### try to visualise
+
+
+
+
+
+# Compute k-means with k = 4
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 4, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+#### try to visualise
+
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 5, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+#### try to visualise
+
+
+# Compute k-means with k = 6
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 6, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+#### try to visualise
+
+
+
+
+##### 2.1.2 theme 44 -  k-mean analysis ######
+
+
+# K means
+k <- 2  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+# K means
+k <- 3  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 4  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 5  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+# K means
+k <- 6  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 7  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 8  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+# K medoide
+k <- 6  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- pam(dfm_countries_tfidf_hamilton, k = 6, metric = "euclidean", stand = FALSE)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+
+
+set.seed(123)
+res.km <- pam(scale(as.data.frame(dfm_countries)[, -1]), 7, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 7, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+#### try to visualise
+
+
+
+
+
+
+
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### 2.2 theme 54 Gender balance and inclusiveness ######
+# create the countries level 
+stip_corp <- corpus(filter(stip, TH54==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+
+
+
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+#write.csv(dfm_countries,'frequ_country_th54.csv', row.names = T)
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+dfm_countries
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+dfm_countries <- dfm_remove(dfm_countries, pattern = c("also" , "within","among", "can", "one", "across", "two", "main", "well",
+                                                       "must", "make",  "three", "may" , "good", "around")) # add the word you want to delete 
+
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+
+
+##### 2.2.1 theme 54 - find k value ######
+
+# Compute k-means with k = 2
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 2, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+# Compute k-means with k = 3
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 4
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 4, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 5, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 6
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 6, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+# Compute k-means with k = 7
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 7, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+
+
+
+
+
+
+# choose the k value 
+dfm_countries.scaled <- scale(as.data.frame(dfm_countries)[, -1])
+fviz_nbclust(dfm_countries.scaled, kmeans, method = "wss") +
+  geom_vline(xintercept = 7, linetype = 2)
+# Average silhouette for kmeans
+fviz_nbclust(dfm_countries.scaled, kmeans, method = "silhouette")
+
+
+### Gap statistic
+library(cluster)
+set.seed(123)
+# Compute gap statistic for kmeans
+# we used B = 10 for demo. Recommended value is ~500
+gap_stat <- clusGap(dfm_countries.scaled, FUN = kmeans, nstart = 25,
+                    K.max = 10, B = 20)
+print(gap_stat, method = "firstmax")
+fviz_gap_stat(gap_stat)
+
+
+
+
+
+
+##### 2.2.2 theme 54 -  k-mean analysis ######
+
+
+# K means
+k <- 2  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+length(unique(dfm_countries@docvars$CountryCode))
+
+
+# K means
+k <- 3  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 4  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 5  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+# K means
+k <- 6  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 7  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 8  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### 2.3 theme 53 Research careers ######
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH44) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th44 = sum(as.numeric(TH44)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_corp <- corpus(filter(stip_0604, TH53==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+
+
+
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+#write.csv(dfm_countries,'frequ_country_th53.csv', row.names = T)
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+dfm_countries
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+dfm_countries <- dfm_remove(dfm_countries, pattern = c("also" , "within","among", "can", "one", "across", "two", "main", "well",
+                                                       "must", "make",  "three", "may" , 
+                                                       "good", "around", "allow", 
+                                                       "total" , "take")) # add the word you want to delete 
+
+
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+
+
+##### 2.3.1 theme 53 - find k value ######
+
+# Compute k-means with k = 2
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 2, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 3
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 4
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 4, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 5, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 6
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 6, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+# Compute k-means with k = 7
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 7, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+# choose the k value 
+dfm_countries.scaled <- scale(as.data.frame(dfm_countries)[, -1])
+fviz_nbclust(dfm_countries.scaled, kmeans, method = "wss") +
+  geom_vline(xintercept = 7, linetype = 2)
+# Average silhouette for kmeans
+fviz_nbclust(dfm_countries.scaled, kmeans, method = "silhouette")
+
+
+### Gap statistic
+library(cluster)
+set.seed(123)
+# Compute gap statistic for kmeans
+# we used B = 10 for demo. Recommended value is ~500
+gap_stat <- clusGap(dfm_countries.scaled, FUN = kmeans, nstart = 25,
+                    K.max = 10, B = 20)
+print(gap_stat, method = "firstmax")
+fviz_gap_stat(gap_stat)
+
+
+
+
+
+
+
+
+##### 2.3.2 theme 53 -  k-mean analysis ######
+
+
+
+
+# K means
+k <- 2  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+# K means
+k <- 3  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 4  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 5  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+# K means
+k <- 6  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 7  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 8  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+# K means
+k <- 10  # number of clusters
+
+# subset The Countries written by Hamilton
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### 3. K-mean clustering Analysis by using PCA  ######
+##### 3.1 theme53 Research careers #####
+# create new dfm
+stip_corp <- corpus(filter(stip, TH53 == 1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+write.csv(dfm_countries,'frequ_country_th53.csv', row.names = T)
+
+
+# see the frequency of words
+dfm_count <- as.matrix(dfm_countries)
+frequ <- colSums(dfm_count)
+frequ <- sort(frequ, decreasing = T)
+frequ <- as.data.frame(frequ)
+write.csv(frequ,'frequth53.csv', row.names = T)
+sum(frequ$frequ)
+
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9 , docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+dfm_countries
+
+#create a dfm that merges all documents by country
+#computes distances between documents from different countries
+tstat_dist <- as.dist(textstat_dist(dfm_weight(dfm_countries, scheme = "prop")))
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+plot(user_clust,  main = "TH53 Research careers", cex = 1.2, horiz = TRUE)
+
+
+sort(ntoken(stip_dfm), decreasing = T)
+
+stip_dfm <- dfm_remove(dfm_subset(stip_dfm, HR == 1), pattern = c('Australia', 'Australian', "also" , "within","among", "can", "one", "across", "two", "main", "well",
+                                                                  "must", "make",  "three", "may" , 
+                                                                  "good", "around", "allow", 
+                                                                  "total" , "take"))
+
+
+
+#create a dfm that merges all documents by country
+dfm_countries <- dfm_group(dfm_subset(stip_dfm, TH53 == 1), groups = CountryCode)
+r <- as.data.frame(dfm_countries)
+#computes distances between documents from different countries
+tstat_dist <- as.dist(textstat_dist(dfm_countries))
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+plot(user_clust,  main = "TH53 Research careers", cex = .7, horiz = TRUE)
+rect.hclust(user_clust, k=5)
+
+
+kfit <- kmeans(tstat_dist, 5, nstart=100)
+library(cluster)
+clusplot(main='TH53 Research careers',as.matrix(tstat_dist), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### 3.2 theme44 Intersectoral mobility #####
+# create new dfm
+stip_corp <- corpus(filter(stip, TH44 == 1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+write.csv(dfm_countries,'frequ_country_th44.csv', row.names = T)
+
+
+# see the frequency of words
+dfm_count <- as.matrix(dfm_countries)
+frequ <- colSums(dfm_count)
+frequ <- sort(frequ, decreasing = T)
+frequ <- as.data.frame(frequ)
+write.csv(frequ,'frequth44.csv', row.names = T)
+sum(frequ$frequ)
+
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9 , docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+dfm_countries
+
+#create a dfm that merges all documents by country
+#computes distances between documents from different countries
+tstat_dist <- as.dist(textstat_dist(dfm_weight(dfm_countries, scheme = "prop")))
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+plot(user_clust,  main = "TH44 Intersectoral mobility", cex = 1.2, horiz = TRUE)
+
+
+sort(ntoken(stip_dfm), decreasing = T)
+
+stip_dfm <- dfm_remove(dfm_subset(stip_dfm, HR == 1), pattern = c('Australia', 'Australian', "also" , "within","among", "can", "one", "across", "two", "main", "well",
+                                                                  "must", "make",  "three", "may" , 
+                                                                  "good", "around", "allow", 
+                                                                  "total" , "take"))
+
+
+
+#create a dfm that merges all documents by country
+dfm_countries <- dfm_group(dfm_subset(stip_dfm, TH44 == 1), groups = CountryCode)
+r <- as.data.frame(dfm_countries)
+#computes distances between documents from different countries
+tstat_dist <- as.dist(textstat_dist(dfm_countries))
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+plot(user_clust,  main = "TH44 Intersectoral mobility", cex = .7, horiz = TRUE)
+rect.hclust(user_clust, k=5)
+
+
+kfit <- kmeans(tstat_dist, 5, nstart=100)
+library(cluster)
+clusplot(main='TH44 Intersectoral mobility',as.matrix(tstat_dist), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### 3.3 theme 54 Gender balance and inclusiveness #####
+# create new dfm
+stip_corp <- corpus(filter(stip, TH54 == 1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+write.csv(dfm_countries,'frequ_country_th54.csv', row.names = T)
+
+
+# see the frequency of words
+dfm_count <- as.matrix(dfm_countries)
+frequ <- colSums(dfm_count)
+frequ <- sort(frequ, decreasing = T)
+frequ <- as.data.frame(frequ)
+write.csv(frequ,'frequth54.csv', row.names = T)
+sum(frequ$frequ)
+
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9 , docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+dfm_countries
+
+#create a dfm that merges all documents by country
+#computes distances between documents from different countries
+tstat_dist <- as.dist(textstat_dist(dfm_weight(dfm_countries, scheme = "prop")))
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+plot(user_clust,  main = "TH54 Gender balance and inclusiveness", cex = 1.2, horiz = TRUE)
+
+
+sort(ntoken(stip_dfm), decreasing = T)
+
+stip_dfm <- dfm_remove(dfm_subset(stip_dfm, HR == 1), pattern = c("also" , "within","among", "can", "one", "across", "two", "main", "well",
+                                                                  "must", "make",  "three", "may" , "good", "around"))
+
+
+
+#create a dfm that merges all documents by country
+dfm_countries <- dfm_group(dfm_subset(stip_dfm, TH54 == 1), groups = CountryCode)
+r <- as.data.frame(dfm_countries)
+#computes distances between documents from different countries
+tstat_dist <- as.dist(textstat_dist(dfm_countries))
+#cluster countries based on these distances
+user_clust <- hclust(tstat_dist)
+plot(user_clust,  main = "TH54 Gender balance and inclusiveness", cex = .7, horiz = TRUE)
+rect.hclust(user_clust, k=5)
+
+
+kfit <- kmeans(tstat_dist, 5, nstart=100)
+library(cluster)
+clusplot(main='TH54 Gender balance and inclusiveness',as.matrix(tstat_dist), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### 4. Compare unigram and bigram in clustering analysis ######
+######## 4.1 th44 #####
+######## 4.1.1 th44 bigram #####################
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH44) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th44 = sum(as.numeric(TH44)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_44 <- filter(stip_all_HR_Coun, Theme=='th44')
+stip_corp <- corpus(filter(merge(stip,stip_all_HR_Coun_44, by = 'CountryCode'), TH44==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+
+
+
+# bigram
+stip_dfm <- tokens(stip_corp) %>%
+  tokens_remove("\\p{P}", valuetype = "regex", padding = TRUE) %>%
+  tokens_remove(stopwords("english"), padding  = TRUE) %>%
+  tokens_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' ) %>%
+  tokens_remove(pattern = c("also" , "within","among", "can", "one", "across", "two" , "ad","d")) %>%
+  tokens_remove(pattern = c("+" , ">","<", "can", "one", "across", "two" )) %>%
+  tokens_ngrams(n = 2) %>%
+  dfm() 
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+
+stip_dfm  <- stip_dfm %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_docfreq = 0.01,  docfreq_type = 'prop') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(stip_dfm) >= 10) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+stip_dfm
+
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+#write.csv(dfm_countries,'frequ_country_th54.csv', row.names = T)
+R <- as.data.frame(dfm_countries)
+
+# remove the less and most common used words
+#dfm_countries  <- dfm_countries %>% 
+#dfm_wordstem() %>% #stem the dfm
+#dfm_trim(max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') # %>% # retain only words included in at least 1% of documents
+#dfm_subset(ntoken(dfm_countries) >= 10 ) # remove documents with less than 10 words
+
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+# K means
+k <- 3  # number of clusters
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+# subset Countries
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+######## 4.1.2 th44 unigram #####################
+# create the countries level 
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH44==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH44) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th44 = sum(as.numeric(TH44)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_44 <- filter(stip_all_HR_Coun, Theme=='th44')
+stip_all_HR_Coun_44$rank <- rank(stip_all_HR_Coun_44$per, ties.method= "first")
+
+stip_corp <- corpus(filter(merge(stip_0604,stip_all_HR_Coun_44, by = 'CountryCode'), TH44==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+
+
+
+dfm_countries
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+dfm_countries <- dfm_remove(dfm_countries, pattern = c("also" , "within","among", "can", "one", "across", "two" )) # add the word you want to delete 
+# tf-idf calculation
+
+
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+# K means
+k <- 5  # number of clusters
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+# subset The Countries
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+######## 4.2 th53 #####
+######## 4.2.1 th53 bigram #####################
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH53==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH53) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th53 = sum(as.numeric(TH53)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_53 <- filter(stip_all_HR_Coun, Theme=='th53')
+stip_corp <- corpus(filter(merge(stip,stip_all_HR_Coun_53, by = 'CountryCode'), TH53==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+
+
+
+# bigram
+stip_dfm <- tokens(stip_corp) %>%
+  tokens_remove("\\p{P}", valuetype = "regex", padding = TRUE) %>%
+  tokens_remove(stopwords("english"), padding  = TRUE) %>%
+  tokens_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' ) %>%
+  tokens_remove(pattern = c("also" , "within","among", "can", "one", "across", "two" , "ad","d")) %>%
+  tokens_remove(pattern = c("+" , ">","<", "can", "one", "across", "two" )) %>%
+  tokens_ngrams(n = 2) %>%
+  dfm() 
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+
+stip_dfm  <- stip_dfm %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_docfreq = 0.01,  docfreq_type = 'prop') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(stip_dfm) >= 10) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+stip_dfm
+
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+#write.csv(dfm_countries,'frequ_country_th54.csv', row.names = T)
+R <- as.data.frame(dfm_countries)
+
+# remove the less and most common used words
+#dfm_countries  <- dfm_countries %>% 
+#dfm_wordstem() %>% #stem the dfm
+#dfm_trim(max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') # %>% # retain only words included in at least 1% of documents
+#dfm_subset(ntoken(dfm_countries) >= 10 ) # remove documents with less than 10 words
+
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+# K means
+k <- 3  # number of clusters
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+# subset Countries
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+######## 4.2.2 th53 unigram #####################
+# create the countries level 
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH53==1 | stip$TH53==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH53) + 
+           as.numeric(stip$TH53) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th53 = sum(as.numeric(TH53)), 
+            th53 = sum(as.numeric(TH53)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_53 <- filter(stip_all_HR_Coun, Theme=='th53')
+stip_all_HR_Coun_53$rank <- rank(stip_all_HR_Coun_53$per, ties.method= "first")
+
+stip_corp <- corpus(filter(merge(stip_0604,stip_all_HR_Coun_53, by = 'CountryCode'), TH53==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+
+
+
+dfm_countries
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+dfm_countries <- dfm_remove(dfm_countries, pattern = c("also" , "within","among", "can", "one", "across", "two" )) # add the word you want to delete 
+# tf-idf calculation
+
+
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+# K means
+k <- 5  # number of clusters
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+# subset The Countries
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+######## 4.3 th54 #####
+######## 4.3.1 th54 bigram #####################
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH54==1 | stip$TH54==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH54) + 
+           as.numeric(stip$TH54) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th54 = sum(as.numeric(TH54)), 
+            th54 = sum(as.numeric(TH54)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_54 <- filter(stip_all_HR_Coun, Theme=='th54')
+stip_corp <- corpus(filter(merge(stip,stip_all_HR_Coun_54, by = 'CountryCode'), TH54==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+
+
+
+# bigram
+stip_dfm <- tokens(stip_corp) %>%
+  tokens_remove("\\p{P}", valuetype = "regex", padding = TRUE) %>%
+  tokens_remove(stopwords("english"), padding  = TRUE) %>%
+  tokens_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' ) %>%
+  tokens_remove(pattern = c("also" , "within","among", "can", "one", "across", "two" , "ad","d")) %>%
+  tokens_remove(pattern = c("+" , ">","<", "can", "one", "across", "two" )) %>%
+  tokens_ngrams(n = 2) %>%
+  dfm() 
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+
+stip_dfm  <- stip_dfm %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_docfreq = 0.01,  docfreq_type = 'prop') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(stip_dfm) >= 10) # remove documents with less than 10 words
+
+#Take a look again: Now, we have substantially reduced the number of features to less than 1000
+stip_dfm
+
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+#write.csv(dfm_countries,'frequ_country_th54.csv', row.names = T)
+R <- as.data.frame(dfm_countries)
+
+# remove the less and most common used words
+#dfm_countries  <- dfm_countries %>% 
+#dfm_wordstem() %>% #stem the dfm
+#dfm_trim(max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') # %>% # retain only words included in at least 1% of documents
+#dfm_subset(ntoken(dfm_countries) >= 10 ) # remove documents with less than 10 words
+
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+# K means
+k <- 3  # number of clusters
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+# subset Countries
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+######## 4.3.2 th54 unigram #####################
+# create the countries level 
+# create the countries level 
+stip_all_HR_Coun <- stip %>%
+  mutate(HR = ifelse(stip$TH50==1| stip$TH54==1 | stip$TH54==1
+                     | stip$TH52==1 | stip$TH55==1 |
+                       stip$TH54==1 , 1, 0), num_hr = as.numeric(stip$TH50) + as.numeric(stip$TH54) + 
+           as.numeric(stip$TH54) +  as.numeric(stip$TH52) + as.numeric(stip$TH55) + as.numeric(stip$TH54) ) %>%
+  filter(HR==1)
+
+
+stip_all_HR_Coun <- stip_all_HR_Coun %>%
+  group_by(CountryCode) %>%
+  summarise(th50 = sum(as.numeric(TH50)), th54 = sum(as.numeric(TH54)), 
+            th54 = sum(as.numeric(TH54)), th52= sum(as.numeric(TH52)),
+            th55= sum(as.numeric(TH55)), th54= sum(as.numeric(TH54)),num = sum(num_hr))
+stip_all_HR_Coun <- gather(stip_all_HR_Coun, Theme, per, -CountryCode) 
+
+
+stip_all_HR_Coun_54 <- filter(stip_all_HR_Coun, Theme=='th54')
+stip_all_HR_Coun_54$rank <- rank(stip_all_HR_Coun_54$per, ties.method= "first")
+
+stip_corp <- corpus(filter(merge(stip_0604,stip_all_HR_Coun_54, by = 'CountryCode'), TH54==1), docid_field = 'InitiativeID', text_field = 'all_texts')
+stip_dfm <- dfm(stip_corp)
+
+
+stip_dfm <- stip_dfm %>%
+  dfm_remove(stopwords('english'), min_nchar = 3) %>%
+  dfm_remove(pattern = '(?<=\\d{1,9})\\w+', valuetype = 'regex' )
+
+
+
+
+#Take a look: This dfm has still more 10000 features
+stip_dfm  
+
+dfm_countries <- dfm_group(stip_dfm, groups = CountryCode)
+
+
+# remove the less and most common used words
+dfm_countries  <- dfm_countries %>% 
+  dfm_wordstem() %>% #stem the dfm
+  dfm_trim(min_termfreq = 2, max_termfreq = max(frequ$frequ),
+           min_docfreq = 0.1, max_docfreq = 0.9, docfreq_type = 'prop', termfreq_type = 'count') %>% # retain only words included in at least 1% of documents
+  dfm_subset(ntoken(dfm_countries) >= 15 ) # remove documents with less than 10 words
+
+
+
+
+dfm_countries
+
+dfm_countries@Dimnames$features # look at the words and look for the words that you want to delete
+
+
+dfm_countries <- dfm_remove(dfm_countries, pattern = c("also" , "within","among", "can", "one", "across", "two" )) # add the word you want to delete 
+# tf-idf calculation
+
+
+
+
+# Compute k-means with k = 5
+set.seed(123)
+res.km <- kmeans(scale(as.data.frame(dfm_countries)[, -1]), 3, nstart = 25)
+# K-means clusters showing the group of each individuals
+res.km$cluster
+
+
+#### try to visualise
+library(ggpubr)
+library(factoextra)
+
+fviz_cluster(res.km, data = dfm_countries[, -1],
+             #palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+             geom = c("point", "text"),
+             ellipse.type = "convex", 
+             ggtheme = theme_bw()
+)
+
+
+
+
+
+
+# K means
+k <- 5  # number of clusters
+# tf-idf calculation
+dfm_countries_tfidf <- dfm_tfidf(dfm_countries, base = 2)
+
+# subset The Countries
+
+dfm_countries_tfidf_hamilton <- dfm_subset(dfm_countries_tfidf)
+
+# run k-means
+km_out <- stats::kmeans(dfm_countries_tfidf_hamilton, centers = k)
+
+km_out$iter # check the convergence; number of iterations may vary
+
+colnames(km_out$centers) <- featnames(dfm_countries_tfidf_hamilton)
+
+for (i in 1:k) { # loop for each cluster
+  cat("CLUSTER", i, "\n")
+  cat("Top 10 words:\n") # 10 most important terms at the centroid
+  print(head(sort(km_out$centers[i, ], decreasing = TRUE), n = 10))
+  cat("\n")
+  cat("Countries classified: \n") # extract essays classified
+  print(docnames(dfm_countries_tfidf_hamilton)[km_out$cluster == i])
+  cat("\n")
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
