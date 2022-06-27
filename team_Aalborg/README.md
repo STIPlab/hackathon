@@ -7,6 +7,7 @@ Below a brief intro to the folder structure
 3. Python: Python notebooks we created
 4. Output: All outputs created, plus a brief manual how to use them
 
+Final presentation can be found [here](https://github.com/STIPlab/hackathon/blob/main/team_Aalborg/output/OECD_STI_hackathon_presenttion_final%20.pptx)
 
 
 # OECD STI hackathon general task description
