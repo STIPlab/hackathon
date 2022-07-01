@@ -1,6 +1,9 @@
 # Python files
 
-Here you will find all exercises carried out in Python, mostly related to creating word and document embeddings, clustering and describing them, and creating document similarity networks.
+Here you will find all exercises carried out in Python, mostly related to the work with the TIP policy documents, namely:
+
+1. creating word and document embeddings, clustering and describing them.
+2. Creating document similarity networks.
 
 For ease of use, find also a colab version below:
 
